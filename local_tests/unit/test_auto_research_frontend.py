@@ -262,11 +262,15 @@ def test_a_key_profile_logs_in_with_its_own_key_and_openrouter_key_stays_for_gem
     assert agent_environment(config, deployed, tmp_path/'mcp.sock')['RAX_MODEL_KEY'] == 'sk-profile-fixture'
 
 
-def test_chatgpt_profile_stores_only_the_login_path(tmp_path, monkeypatch, demo_cache):
+@pytest.mark.parametrize('explicit_mode', [True, False])
+def test_chatgpt_profile_stores_only_the_login_path(tmp_path, monkeypatch, demo_cache, explicit_mode):
     provider = tmp_path/'provider'
     provider.mkdir()
-    (provider/'auth.json').write_text(json.dumps({'auth_mode': 'chatgpt',
-        'tokens': {'access_token': 'h.e30.s', 'refresh_token': 'r', 'account_id': 'acct-fixture'}}))
+    auth = {'OPENAI_API_KEY': None,
+            'tokens': {'access_token': 'h.e30.s', 'refresh_token': 'r', 'account_id': 'acct-fixture'}}
+    if explicit_mode:
+        auth['auth_mode'] = 'chatgpt'
+    (provider/'auth.json').write_text(json.dumps(auth))
     (provider/'openrouter_key').write_text('sk-or-fixture\n')
     (provider/'openrouter_key').chmod(0o600)
     (provider/'login.config.toml').write_text('model_provider="chatgpt"\n[model_providers.chatgpt]\nname="ChatGPT"\n'
@@ -785,3 +789,18 @@ def test_a_failed_start_is_kept_in_the_operator_record(supervisor, frontend, mon
     errors = [e for e in events if e['event'] == 'mcp_error']
     assert [(e['tool'], e['stage'], e['reason']) for e in errors] == [('start_episode', 'lifecycle', reason)]
     assert published['start_failure']['reason'] == reason
+
+
+@pytest.mark.parametrize('auth', [
+    {'auth_mode': 'apikey', 'tokens': {'access_token': 'a', 'refresh_token': 'r'}},
+    {'OPENAI_API_KEY': 'fixture-key', 'tokens': {'access_token': 'a', 'refresh_token': 'r'}},
+    {'auth_mode': 'chatgpt', 'OPENAI_API_KEY': 'fixture-key', 'tokens': {'access_token': 'a', 'refresh_token': 'r'}},
+    {'tokens': {'access_token': 'a'}},
+    {'tokens': {'refresh_token': 'r'}},
+])
+def test_chatgpt_profile_rejects_non_oauth_or_incomplete_login(tmp_path, auth):
+    from harness.codex_cli.auto_research import chatgpt_login
+    path = tmp_path/'auth.json'
+    path.write_text(json.dumps(auth))
+    with pytest.raises(ValueError, match='not a Codex ChatGPT login'):
+        chatgpt_login(path)

@@ -136,7 +136,10 @@ def chatgpt_login(path):
     """A Codex ChatGPT login file (such as a profile's auth.json); its tokens stay in it."""
     auth = json.loads(Path(path).read_text())
     tokens = auth.get('tokens') or {}
-    if auth.get('auth_mode') != 'chatgpt' or not tokens.get('access_token') or not tokens.get('refresh_token'):
+    # Native Codex also persists OAuth logins without an explicit auth_mode.
+    mode = auth.get('auth_mode')
+    if (mode not in (None, 'chatgpt') or auth.get('OPENAI_API_KEY')
+            or not tokens.get('access_token') or not tokens.get('refresh_token')):
         raise ValueError(f'{path} is not a Codex ChatGPT login')
     return auth
 
