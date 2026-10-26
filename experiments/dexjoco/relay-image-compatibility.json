@@ -1,0 +1,12 @@
+{
+  "user_image_png_input_tokens": 309,
+  "tool_result_png_input_tokens": 231793,
+  "tool_result_jpeg_input_tokens": 38399,
+  "lifted_tool_image_png_input_tokens": 611,
+  "image_resolution": [
+    640,
+    640
+  ],
+  "regression_tests_passed": 13,
+  "scope": "custom Messages transport; endpoint-reported usage only"
+}

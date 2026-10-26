@@ -1,0 +1,73 @@
+{
+  "kind": "simulator-only smoke; not robot task success or agent benchmark",
+  "gpu": "NVIDIA GeForce RTX 4070 Laptop GPU, 580.178.04, 8188 MiB",
+  "repository_commit": "4b577aa2ba0039ad01707ede236be9913274180e",
+  "simulator_commit": "8d23b0fab23b17a58c4b55f3942e17013aaf8267",
+  "offline_unit_tests_passed": 47,
+  "agent_model_calls": 0,
+  "tasks": [
+    {
+      "task": "click_mouse",
+      "startup_seconds": 3.76,
+      "cameras": [
+        "ego_right",
+        "wrist"
+      ],
+      "rgb_shapes": {
+        "ego_right": [
+          640,
+          640,
+          3
+        ],
+        "wrist": [
+          640,
+          640,
+          3
+        ]
+      },
+      "depth_finite_fraction": {
+        "ego_right": 1.0,
+        "wrist": 1.0
+      },
+      "hold_seconds_per_step": 0.0554,
+      "chunk_seconds_per_step": 0.0547,
+      "determinism_identical": true,
+      "distinct_layouts": 3
+    },
+    {
+      "task": "bimanual_assembly",
+      "startup_seconds": 2.45,
+      "cameras": [
+        "ego",
+        "wrist_left",
+        "wrist_right"
+      ],
+      "rgb_shapes": {
+        "ego": [
+          640,
+          640,
+          3
+        ],
+        "wrist_left": [
+          640,
+          640,
+          3
+        ],
+        "wrist_right": [
+          640,
+          640,
+          3
+        ]
+      },
+      "depth_finite_fraction": {
+        "ego": 1.0,
+        "wrist_left": 1.0,
+        "wrist_right": 1.0
+      },
+      "hold_seconds_per_step": 0.0654,
+      "chunk_seconds_per_step": 0.0614,
+      "determinism_identical": true,
+      "distinct_layouts": 3
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+# Compatible with the official openpi-client NumPy 1.26.4 pin.
+# Avoid downloading and rejecting every newer JAX wheel during pip resolution.
+numpy==1.26.4
+jax==0.6.2
+jaxlib==0.6.2
+opencv-python==4.11.0.86
