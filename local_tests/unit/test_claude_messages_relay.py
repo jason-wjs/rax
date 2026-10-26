@@ -151,6 +151,9 @@ def test_native_read_and_shell_cannot_reach_external_key_symlink(sandbox_runtime
         with deadline(120):
             result = claude.launch(config, deployed, prompt='Local boundary check. No robot episode.', capture=True)
         assert result.returncode == 0, result.stderr[-1000:]
+        for request in received:
+            advertised = {tool['name'] for tool in request.get('tools', [])}
+            assert not advertised.intersection({'Agent', 'Task', 'Workflow', 'ScheduleWakeup', 'WebFetch', 'WebSearch'})
         results = [b for m in received[-1]['messages'] if isinstance(m['content'], list)
                    for b in m['content'] if b.get('type') == 'tool_result']
         assert results[0]['tool_use_id'] == 'read-canary' and results[0].get('is_error')

@@ -69,7 +69,7 @@ def test_claude_runs_natively_and_leaves_nothing_running(session):
     assert argv[0] == '-p' and argv[argv.index('--model') + 1] == 'claude-opus-5-5'
     assert argv[argv.index('--mcp-config') + 1] == str(home/'mcp.json') and '--strict-mcp-config' in argv
     denied = argv[argv.index('--disallowedTools') + 1:argv.index('--output-format')]
-    assert {'WebFetch', 'WebSearch', 'Agent', 'Task'} <= set(denied)  # No internet; subagent cap 0.
+    assert {'WebFetch', 'WebSearch', 'Agent', 'Task', 'Workflow', 'ScheduleWakeup'} <= set(denied)  # No internet; subagent cap 0.
     assert argv[-2:] == ['--', 'go'] and '--resume' not in argv
     environment = dict(line.split('=', 1) for line in (home/'env').read_text().splitlines() if '=' in line)
     assert environment['CLAUDE_CONFIG_DIR'] == str(home) and environment['HOME'] == str(home)
