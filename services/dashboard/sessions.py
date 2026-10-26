@@ -188,6 +188,8 @@ class ResearchSessions:
         from services.controller.config import AGENT_EFFORTS
         if values['agent_effort'] not in AGENT_EFFORTS:
             raise ValueError('Invalid agent_effort')
+        if values['agent_effort'] == 'high' and values['agent_cli'] not in ('codex', 'claude'):
+            raise ValueError('high effort is currently supported only by Codex and Claude')
         from services.transfer import CONTEXTS, validate_parts
         if values['agent_formal'] not in ('off', 'on'):
             raise ValueError('agent_formal must be off or on')

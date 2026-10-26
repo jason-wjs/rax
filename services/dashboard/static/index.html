@@ -84,7 +84,7 @@ details > summary { cursor: pointer; color: var(--accent); }
         <label>Task rules <select name="task_rules"><option value="public">Public wiki rubric</option><option value="code-summary">Public rubric + rules from the task code</option></select></label>
         <label>Agent CLI <select name="agent_cli"><option value="codex">codex</option><option value="claude">claude</option><option value="dsh">DeepSeek Harness</option><option value="kimi">Kimi Code</option><option value="cursor">Cursor CLI</option></select></label>
         <label>Agent provider <select name="agent_provider"><option value="openrouter">openrouter</option><option value="claude-login">claude experiment login</option><option value="anthropic">anthropic</option></select></label>
-        <label title="Model reasoning effort for the selected agent CLI">Reasoning effort <select name="agent_effort"><option value="xhigh">xhigh</option><option value="max">max</option></select></label>
+        <label title="Model reasoning effort for the selected agent CLI">Reasoning effort <select name="agent_effort"><option value="xhigh">xhigh</option><option value="high">high</option><option value="max">max</option></select></label>
         <label title="More episodes than the collection has layouts cycle through it again">Exploration episodes <input name="episodes" type="number" min="2" max="1000"></label>
         <label>Exploration environments <input name="exploration_envs" type="number" min="1" max="8"></label>
         <label title="0 = one subagent per environment when there are several, none with one environment">Max subagents <input name="subagents" type="number" min="0" max="8"></label>

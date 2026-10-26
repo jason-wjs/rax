@@ -287,7 +287,8 @@ def test_chatgpt_profile_stores_only_the_login_path(tmp_path, monkeypatch, demo_
     assert 'model_providers' not in tomllib.loads(settings) and 'h.e30.s' not in settings
 
 
-def test_profile_model_is_the_sessions_only_model(tmp_path, monkeypatch, demo_cache):
+@pytest.mark.parametrize('effort', ['high', 'xhigh', 'max'])
+def test_profile_model_is_the_sessions_only_model(tmp_path, monkeypatch, demo_cache, effort):
     """A profile's [rax] model is the model in the session's Codex configuration."""
     provider = tmp_path/'provider'
     login = tmp_path/'elsewhere/auth.json'
@@ -302,10 +303,20 @@ def test_profile_model_is_the_sessions_only_model(tmp_path, monkeypatch, demo_ca
     from services.controller.demonstrations import provision_demonstration
     monkeypatch.setattr('harness.codex_cli.auto_research.provision_demonstration',
         lambda config, workspace, _, **kw: provision_demonstration(config, workspace, demo_cache.parent, **kw))
-    deployed = deploy(configuration(tmp_path), provider_home=provider, profile='other', codex='/usr/bin/true')
+    from dataclasses import asdict
+    from scripts.configure_auto_research import arguments
+    from services.controller.config import Configuration
+    args = arguments().parse_args(['--task', TASK, '--sim-gpu', '0',
+                                   '--agent-cli', 'codex', '--agent-effort', effort])
+    saved = tmp_path/'operator-input.json'
+    saved.write_text(json.dumps(asdict(replace(configuration(tmp_path), agent_effort=args.agent_effort)), default=str))
+    loaded = Configuration.from_dict(json.loads(saved.read_text()))
+    deployed = deploy(loaded, provider_home=provider, profile='other', codex='/usr/bin/true')
     stored = json.loads(deployed['login'].read_text())
     assert stored['model'] == 'gpt-6.1-sol' and stored['chatgpt_auth'] == str(login.resolve())
-    assert tomllib.loads((deployed['codex_home']/'config.toml').read_text())['model'] == 'gpt-6.1-sol'
+    native = tomllib.loads((deployed['codex_home']/'config.toml').read_text())
+    assert native['model'] == 'gpt-6.1-sol'
+    assert loaded.agent_effort == native['model_reasoning_effort'] == effort
     (provider/'bad.config.toml').write_text((provider/'other.config.toml').read_text().replace(
         'model="openai/gpt-6.1-sol"', 'model="bad model"'))
     with pytest.raises(ValueError, match="Invalid model in provider profile 'bad'"):

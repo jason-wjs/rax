@@ -94,3 +94,13 @@ def test_resume_passes_the_selected_claude_binary(tmp_path, monkeypatch):
     with pytest.raises(AtDeployment):
         launcher.main()
     assert seen == {'claude': Path('/fixture/claude')}
+
+
+@pytest.mark.parametrize('cli,provider', [('dsh', 'custom'), ('cursor', 'cursor-account'), ('kimi', 'custom')])
+def test_high_effort_is_rejected_when_the_adapter_cannot_apply_it(tmp_path, cli, provider):
+    with pytest.raises(ValueError, match='high effort is currently supported only by Codex and Claude'):
+        replace(configuration(tmp_path), agent_cli=cli, agent_provider=provider, agent_effort='high')
+    dashboard = ResearchSessions(tmp_path, lambda: list(OFFICIAL_TASKS))
+    with pytest.raises(ValueError, match='high effort is currently supported only by Codex and Claude'):
+        dashboard.settings({'task': 'hammer_nail', 'agent_cli': cli, 'agent_provider': provider,
+                            'agent_effort': 'high'})

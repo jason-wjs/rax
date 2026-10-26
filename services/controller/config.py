@@ -12,7 +12,7 @@ from services.demonstration_io import DEMONSTRATION_CONTEXTS
 FORMAL_EPISODES = 50  # Default held-out formal episodes of a new session.
 # Reasoning efforts both agent CLIs (Codex model_reasoning_effort, Claude Code --effort)
 # and OpenRouter accept; xhigh is the established default.
-AGENT_EFFORTS = ('xhigh', 'max')
+AGENT_EFFORTS = ('high', 'xhigh', 'max')
 # What the mounted expert episodes hold: 'full' (commanded references, measured motion, object
 # states and camera) or 'images' (front-camera video, previews and depth only).
 EXPERT_CONTENTS = ('full', 'images')
@@ -102,7 +102,7 @@ class Configuration:
     agent_cli: str = 'codex'  # 'codex' or 'claude' (harness/claude_cli)
     agent_provider: str = 'openrouter'  # Provider choices depend on the native agent backend.
     external_perception: bool = True  # Optional external Gemini tool; native model vision works without it.
-    agent_effort: str = 'xhigh'  # Model reasoning effort for the agent CLI: xhigh or max
+    agent_effort: str = 'xhigh'  # Native reasoning effort, validated for the selected adapter.
     # The session's one evaluation mode. Off (code mode): the agent submits one rehearsed
     # bundle, run alone on the held-out layouts. On (live-copy mode, services/agent_formal):
     # exploration has no bundle tools; once its episodes are spent, each held-out episode is
@@ -173,6 +173,8 @@ class Configuration:
             raise ValueError(f'{self.agent_cli} currently supports code formal, one exploration environment, no adaptation or subagents')
         if self.agent_effort not in AGENT_EFFORTS:
             raise ValueError(f'agent_effort must be one of {AGENT_EFFORTS}')
+        if self.agent_effort == 'high' and self.agent_cli not in ('codex', 'claude'):
+            raise ValueError('high effort is currently supported only by Codex and Claude')
         if self.demonstration_context not in DEMONSTRATION_CONTEXTS:
             raise ValueError('Invalid demonstration_context')
         from services.transfer import CONTEXTS, validate_parts
