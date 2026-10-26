@@ -21,10 +21,10 @@ SUPPORT = Path('/opt/rax-cli')
 
 
 def stage_support(root):
-    """Only the four public transport helpers enter the container runtime."""
+    """Only the public transport helpers enter the container runtime."""
     target = Path(root)/'container-support'
     files = ('container_cli/runner.py', 'isolated_cli/transport.mjs',
-             'deepseek_cli/private_provider.mjs', 'mcp_bridge.py')
+             'deepseek_cli/private_provider.mjs', 'deepseek_cli/message_images.mjs', 'mcp_bridge.py')
     for relative in files:
         destination = target/relative
         destination.parent.mkdir(parents=True, exist_ok=True)

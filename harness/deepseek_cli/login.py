@@ -40,7 +40,8 @@ class Credential:
         if self.provider == 'custom':
             return 'rax-private', [{'insert': [{'id': 'rax-private',
                 'name': str(Path(__file__).with_name('private_provider.mjs')),
-                'config': {'baseURL': self.base_url, 'thinking': 'enabled', 'reasoningEffort': 'max'}}]}]
+                'config': {'baseURL': self.base_url, 'thinking': 'enabled', 'reasoningEffort': 'max',
+                    'models': [{'id': model, 'name': model, 'inputModalities': ['text', 'image']}]}}]}]
         if self.provider == 'openrouter':
             route = 'rax-model'
             provider = {'api': 'openai-completions',

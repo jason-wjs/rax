@@ -1,6 +1,7 @@
 // Reuse DSH's native DeepSeek protocol; private vLLM accepts Bearer authentication.
 // The credential is resolved in memory and never enters plugin configuration.
 import { pathToFileURL } from 'node:url';
+import { liftToolResultImages } from './message_images.mjs';
 const root = `${process.env.RAX_DSH_INSTALL}/node_modules/@deepseek-ai`;
 const protocol = await import(pathToFileURL(`${root}/dsh-llm-deepseek/lib/index.js`).href);
 export const Config = protocol.Config;
@@ -19,8 +20,9 @@ export function apply(ctx, config) {
       const body = JSON.parse(init.body);
       if (body.thinking?.type === 'enabled' && body.thinking.budget_tokens === undefined) {
         body.thinking.budget_tokens = body.max_tokens - 1;
-        init = { ...init, body: JSON.stringify(body) };
       }
+      liftToolResultImages(body);
+      init = { ...init, body: JSON.stringify(body) };
     }
     return fetch(input, init);
   };

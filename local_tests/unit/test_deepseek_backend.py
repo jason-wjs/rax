@@ -54,7 +54,8 @@ def test_custom_credentials_never_allow_embedded_url_auth(tmp_path):
     route, rows = credential.patches('deepseek-flash', 'max')
     assert route == 'rax-private'
     assert rows[0]['insert'][0]['config'] == {'baseURL':'http://127.0.0.1:8000',
-        'thinking':'enabled', 'reasoningEffort':'max'}
+        'thinking':'enabled', 'reasoningEffort':'max',
+        'models': [{'id': 'deepseek-flash', 'name': 'deepseek-flash', 'inputModalities': ['text', 'image']}]}
 
 
 def test_account_mode_uses_native_store_and_max_effort_without_api_key(tmp_path):
@@ -123,3 +124,14 @@ def test_frozen_dsh_package_carries_conversation_without_credentials(tmp_path):
     assert record['home_files'] == []
     assert (package/'session'/record['session_files'][0]).read_text() == session.read_text()
     assert not (package/'session/.credentials.yaml').exists()
+
+
+@pytest.mark.parametrize('model', ['deepseek-flash', 'deepseek-v4.1-flash'])
+def test_custom_model_declares_image_input(tmp_path, model):
+    key = private_key(tmp_path)
+    credential = Credential('custom', key_file=key, base_url='https://relay.invalid')
+    route, rows = credential.patches(model, 'max')
+    configured = rows[0]['insert'][0]['config']['models']
+    selected = next(entry for entry in configured if entry['id'] == model)
+    assert selected['inputModalities'] == ['text', 'image']
+    assert key.read_text() not in json.dumps(rows)
