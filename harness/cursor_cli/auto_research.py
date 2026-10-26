@@ -82,7 +82,15 @@ def write_home(config, deployed, socket=None):
         'deny': ['WebFetch(*)', *(rule for path in private for rule in (f'Read({path})', f'Read({path}/**)')),
                  *(rule for path in (*private, str(workspace/'.cursor'))
                    for rule in (f'Write({path})', f'Write({path}/**)'))]}
-    persist(home/'cli-config.json', {'version': 1, 'editor': {'vimMode': False},
+    settings_path = home/'cli-config.json'
+    previous = json.loads(settings_path.read_text()) if settings_path.exists() else {}
+    # Keep the vendor's account identity, which binds its cached feature metadata.
+    # Credentials and feature settings are not copied into the generated config.
+    auth_info = previous.get('authInfo') or {}
+    identity = {key: auth_info[key] for key in ('email', 'displayName', 'teamId', 'teamName',
+        'userId', 'authId', 'organizationId', 'activeTeamId') if key in auth_info}
+    persist(settings_path, {'version': 1, 'editor': {'vimMode': False},
+        **({'authInfo': identity} if identity else {}),
         'approvalMode': 'allowlist', 'autoAcceptWebSearch': False, 'permissions': permissions,
         'sandbox': {'mode': 'enabled', 'readBoundary': 'workspace', 'networkAccess': 'user_config_only'}})
     cursor = workspace/'.cursor'
@@ -185,10 +193,11 @@ path.write_text('OK')
 print('RAX_CURSOR_BOUNDARY_OK')
 '''
     try:
-        result = subprocess.run([str(deployed['cursor']), 'sandbox', 'run', '/usr/bin/python3', '-I', '-c', script],
+        # Cursor's sandbox command joins its arguments into a shell command.
+        result = subprocess.run([str(deployed['cursor']), 'sandbox', 'run', '--', '/usr/bin/python3', '-I', '-c', shlex.quote(script)],
             cwd=workspace, env=agent_environment(config, deployed, agent_host.socket_path(config.root)),
             capture_output=True, text=True, timeout=45)
-        if result.returncode or 'RAX_CURSOR_BOUNDARY_OK' not in result.stdout:
+        if result.returncode or 'RAX_CURSOR_BOUNDARY_OK' not in result.stdout.splitlines():
             persist(home/'boundary-check.json', {'passed': False, 'returncode': result.returncode})
             raise RuntimeError('Cursor effective sandbox boundary failed; no model run was started')
         persist(home/'boundary-check.json', {'passed': True, 'checked_at': time.time(),

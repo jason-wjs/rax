@@ -1,6 +1,7 @@
 """Cursor adapter contracts. No account calls or inference; native CLI smoke is separate."""
 from dataclasses import replace
 import json
+import shlex
 from pathlib import Path
 import subprocess
 import sys
@@ -218,3 +219,70 @@ def test_dashboard_selects_cursor_usage_reader(tmp_path, monkeypatch):
     monkeypatch.setattr(dashboard, 'command', lambda *args: [])
     monkeypatch.setattr(dashboard, 'live_observation', lambda *args: None)
     assert dashboard.detail('fixture')['usage']['token_usage']['total_tokens'] == 23102
+
+
+def test_rewriting_home_preserves_only_official_identity_metadata(deployed):
+    config, value, _, _ = deployed
+    home = value[cursor.HOME_KEY]
+    settings = home/'cli-config.json'
+    identity = {'authId': 'fixture-account', 'userId': 123, 'email': 'fixture@example.invalid',
+                'teamId': 7, 'activeTeamId': 7, 'organizationId': 'org-fixture',
+                'displayName': 'Fixture', 'teamName': 'Fixture team'}
+    settings.write_text(json.dumps({'authInfo': {**identity, 'accessToken': 'must-not-copy'},
+        'approvalMode': 'unrestricted', 'sandbox': {'readBoundary': 'system'},
+        'serverConfigCache': {'cliSandboxDefaultEnabled': False}}))
+    cache = home/'statsig-cache.json'
+    cache.write_text('fixture-vendor-cache-unchanged')
+    cursor.write_home(config, value)
+    written = json.loads(settings.read_text())
+    assert written['authInfo'] == identity
+    assert written['approvalMode'] == 'allowlist'
+    assert written['sandbox']['readBoundary'] == 'workspace'
+    assert 'serverConfigCache' not in written
+    assert cache.read_text() == 'fixture-vendor-cache-unchanged'
+    cursor.write_home(config, value)
+    assert json.loads(settings.read_text())['authInfo'] == identity
+
+
+def test_preflight_survives_vendor_shell_join_and_requires_actual_output(deployed, monkeypatch):
+    config, value, _, _ = deployed
+    captured = []
+    def sandbox_run(command, **kwargs):
+        # The official sandbox-debug implementation joins these argv elements.
+        assert command[1:4] == ['sandbox', 'run', '--']
+        parsed = shlex.split(' '.join(command[4:]))
+        assert parsed[:3] == ['/usr/bin/python3', '-I', '-c']
+        assert len(parsed) == 4
+        compile(parsed[3], '<cursor-boundary>', 'exec')
+        assert str(value[cursor.HOME_KEY]/'boundary-canary.txt') in parsed[3]
+        captured.append(command)
+        return subprocess.CompletedProcess(command, 0, 'STDOUT:\nRAX_CURSOR_BOUNDARY_OK\n', '')
+    monkeypatch.setattr(cursor.subprocess, 'run', sandbox_run)
+    cursor.preflight(config, value)
+    assert len(captured) == 1
+    assert json.loads((value[cursor.HOME_KEY]/'boundary-check.json').read_text())['passed']
+    assert not (value[cursor.HOME_KEY]/'boundary-canary.txt').exists()
+
+
+@pytest.mark.parametrize('returncode,stdout', [
+    (0, "Executing command: python3 -c print('RAX_CURSOR_BOUNDARY_OK')\n"),
+    (0, 'prefixed RAX_CURSOR_BOUNDARY_OK\n'),
+    (1, 'RAX_CURSOR_BOUNDARY_OK\n'),
+])
+def test_failed_boundary_stops_launch_before_frontend_or_model(deployed, monkeypatch, returncode, stdout):
+    config, value, _, _ = deployed
+    calls = []
+    def sandbox_run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, returncode, stdout, '')
+    def unexpected_start(*args, **kwargs):
+        pytest.fail('A failed boundary must not start the frontend or model')
+    monkeypatch.setattr(cursor.subprocess, 'run', sandbox_run)
+    monkeypatch.setattr(cursor, 'start_frontend', unexpected_start)
+    monkeypatch.setattr(cursor.agent_host, 'start', unexpected_start)
+    with pytest.raises(RuntimeError, match='no model run was started'):
+        cursor.launch(config, value, prompt='Must not reach a model')
+    assert len(calls) == 1
+    assert calls[0][1:3] == ['sandbox', 'run']
+    assert not json.loads((value[cursor.HOME_KEY]/'boundary-check.json').read_text())['passed']
+    assert not (value[cursor.HOME_KEY]/'boundary-canary.txt').exists()

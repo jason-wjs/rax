@@ -96,12 +96,38 @@ DSH and Claude Code have passed live image/tool/shell/resume/max-effort checks
 against the selected custom relay. All eleven simulator doctors pass. Goal-image
 preparation and full task trials have separate machine-local progress records.
 
-The account's Cursor catalog advertises a 500k window, xhigh and Fast, but the
-tested CLI selection has not yet demonstrated all three settings together. An
-observed fallback to High/Fast/default context is a failed configuration check.
-The adapter implementation and direct native sandbox checks do not replace a
-successful actual-agent configuration and boundary check. Until that succeeds,
-the requested Cursor robotics trial must remain unstarted.
+Cursor has two unresolved gates. With a fresh private config directory, the
+official `sandbox run` command in CLI `2026.10.22-27dcf5f` reports a `system` read
+boundary even when the config requests `workspace`. The official `--list-models`
+and `status` commands return successfully but do not populate the account identity
+or feature cache needed by that command. The launcher tests the effective boundary
+and aborts before starting the frontend or model when isolation fails. Rewriting
+an existing session preserves only the vendor's supported `authInfo` identity
+fields; it neither creates identity nor overrides feature flags.
+
+The account's catalog advertises a 500k window, xhigh and Fast, but returns only
+one parameterized variant: `context=256k,reasoning_effort=high,fast=true`. CLI
+`2026.10.19-6bbf2c4` rejected the requested bracket selection; a persisted-config
+probe instead resolved to High/Fast with `maxMode=false`. One bounded requested
+configuration probe on `2026.10.22-27dcf5f` timed out before model initialization.
+Source inspection shows that a legacy xhigh/Fast alias plus persisted `maxMode`
+still passes through parameter sanitization against that catalog; it does not
+establish xhigh/500k. This is not enough evidence to attribute the failure to
+subscription entitlement, and no reduced-setting run counts as acceptance.
+
+Direct tests of the unmodified native sandbox helper, using a policy translated
+from the generated project config, permit published-result reads, agent Python
+and the robot Unix socket while denying private files, credentials, network,
+host processes and GPU access. Those tests do not establish actual-agent policy
+propagation or native Read-tool enforcement. Machine-local evidence is recorded
+in `experiments/cursor-offline-boundary.json`,
+`experiments/cursor-native-policy-boundary.json`,
+`experiments/cursor-fresh-preflight.json` and
+`experiments/cursor-static-contract.json`. The fresh-home preflight check uses an
+empty account fixture and confirms that the real CLI reports the broad boundary,
+executes the private-file assertion and stops before any frontend or model starts. Until the effective startup boundary
+and requested model settings both pass, the Cursor robotics trial remains
+unstarted.
 
 Keep source and sanitized evidence in Git; environments, account files, real API
 keys, full transcripts, recordings and operator manifests stay outside it.
