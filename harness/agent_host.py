@@ -33,7 +33,7 @@ HOST_SOCKETS = (Path('/run/docker.sock'), Path('/var/run/docker.sock'), Path('/r
 # among them the logins a Codex account switcher keeps in ~/.codex/accounts and the GitHub CLI's token.
 # All of ~/.codex: its logins and keys, provider profiles (which may carry a key), history and transcripts.
 HOME = Path.home()
-SECRETS = ('.ssh', '.aws', '.config/gcloud', '.netrc', '.git-credentials', '.config/rax', '.claude',
+SECRETS = ('.ssh', '.aws', '.config/gcloud', '.netrc', '.git-credentials', '.config/rax', '.cursor', '.config/cursor', '.claude',
            '.claude.json', '.codex', '.config/gh')
 # Codex's standalone install under ~/.codex stays readable: Codex re-runs its own binary in the sandbox.
 CODEX_INSTALL = '.codex/packages'

@@ -1,5 +1,7 @@
 """Regression tests for gaps found in reviews of the generated workspaces."""
 
+import pytest
+
 from services.controller.frontend import DEFINITIONS, for_cli
 from services.mcp_contract import Contract
 from services.workspace import describe
@@ -7,9 +9,10 @@ from services.workspace.contract_files import manifest
 from bench import STATUS
 
 
-def test_claude_tool_descriptions_have_no_codex_wrapper():
+@pytest.mark.parametrize('cli', ['claude', 'dsh', 'kimi', 'cursor'])
+def test_native_tool_descriptions_have_no_codex_wrapper(cli):
     assert any('functions.exec' in t['description'] for t in DEFINITIONS)
-    assert not any('functions.exec' in t['description'] for t in for_cli(DEFINITIONS, 'claude'))
+    assert not any('functions.exec' in t['description'] for t in for_cli(DEFINITIONS, cli))
     assert for_cli(DEFINITIONS, 'codex') == DEFINITIONS
 
 

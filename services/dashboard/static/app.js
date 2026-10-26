@@ -109,11 +109,22 @@ function loadForm() {
   for (const select of document.querySelectorAll('.demoSelect')) {
     if (!select.options.length) select.replaceChildren(...(data.demonstration_contexts || []).map(kind => new Option(kind, kind)));
   }
-  if (!dirty) fillForm(form(), data.profile);
+  if (!dirty) {
+    form().elements.agent_cli.value = data.profile.agent_cli;
+    updateAgentProviders(data.profile.agent_provider);
+    fillForm(form(), data.profile);
+  } else updateAgentProviders();
   formBenchmark = benchmarkOf(form().elements.task.value);
   applyBenchmark(false);
   $('prepare').disabled = false;
   updateTimeouts();
+}
+
+function updateAgentProviders(preferred) {
+  const elements = form().elements, providers = data?.agent_providers?.[elements.agent_cli.value] || [];
+  const selected = preferred ?? elements.agent_provider.value;
+  syncSelect(elements.agent_provider, providers.map(value => [value, value]),
+    providers.includes(selected) ? selected : providers[0]);
 }
 
 let formBenchmark = null;
@@ -469,6 +480,7 @@ $('history').addEventListener('change', () => { selected = ''; switchView(); });
 $('refresh').addEventListener('click', refresh);
 $('researchForm').addEventListener('input', event => {
   dirty = true;
+  if (event.target.name === 'agent_cli') updateAgentProviders();
   if (event.target.name === 'task' && benchmarkOf(event.target.value) !== formBenchmark) {
     const previous = formBenchmark;
     formBenchmark = benchmarkOf(event.target.value);

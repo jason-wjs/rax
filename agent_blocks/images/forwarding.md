@@ -7,6 +7,6 @@ saved frames selectively with native image viewing rather than loading many at o
 {% else %}
 Camera images are tool-result attachments, not MCP resources; you see them directly
 in the tool result. Never print or stringify image bytes, call `resources/list` for
-cameras, or resize inline images. View saved frames selectively with the Read tool
+cameras, or resize inline images. View saved frames selectively with your image-capable file tool
 rather than loading many at once.
 {% endif %}

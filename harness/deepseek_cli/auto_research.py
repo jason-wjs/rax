@@ -68,11 +68,13 @@ def redeploy(config, *, binary=None):
 
 def boundary(config, deployed, socket):
     workspace = Path(deployed['workspace']).resolve()
+    login = json.loads(Path(deployed['login']).read_text())
+    credentials = [Path(login[name]).resolve() for name in ('key_file', 'auth_home') if login.get(name)]
     exposed = [config.root/'published', *agent_host.reexposed_paths(),
                *(source for source, _ in reference_sources(config))]
     return {'bwrap': shutil.which('bwrap') or '/usr/bin/bwrap', 'workspace': str(workspace),
             'socket_directory': str(Path(socket).parent.resolve()),
-            'hidden': [str(p) for p in agent_host.hidden_paths(config.root)],
+            'hidden': [str(p) for p in (*agent_host.hidden_paths(config.root), *credentials)],
             'reexposed': [str(p.resolve()) for p in exposed],
             'file_read_roots': [str(workspace), *[str(p.resolve()) for p in exposed],
                                 *[str(Path(p).resolve()) for p in ('/usr', '/bin', '/lib', '/lib64', '/etc')]]}

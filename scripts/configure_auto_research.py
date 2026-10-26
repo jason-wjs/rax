@@ -15,6 +15,7 @@ from services.controller.config import AGENT_EFFORTS, EXPERT_CONTENTS, Configura
 from services.benchmarks import BENCHMARKS, DEFAULT, benchmark as benchmark_named
 from services.controller.batch import validate_layouts
 from services.demonstration_io import DEMONSTRATION_CONTEXTS
+from harness.backends import NAMES, provider_choices
 
 
 def exploration_seeds(args):
@@ -54,9 +55,9 @@ def arguments():
                         help='Simulator benchmark')
     parser.add_argument('--task-rules', choices=('public', 'code-summary'), default='public',
                         help='TASK.md: the public task definition, or add rules summarized from the official task code')
-    parser.add_argument('--agent-cli', choices=('codex', 'claude', 'dsh', 'kimi'), default='codex',
+    parser.add_argument('--agent-cli', choices=NAMES, default='codex',
                         help='Agent CLI backend')
-    parser.add_argument('--agent-provider', choices=('openrouter', 'claude-login', 'anthropic', 'custom', 'deepseek-api', 'deepseek-account', 'moonshot-api', 'kimi-account'), default='openrouter',
+    parser.add_argument('--agent-provider', choices=tuple(dict.fromkeys(p for name in NAMES for p in provider_choices(name))), default='openrouter',
                         help='Model provider for the selected native agent CLI')
     parser.add_argument('--agent-effort', choices=AGENT_EFFORTS, default='xhigh',
                         help='Model reasoning effort for the agent CLI')

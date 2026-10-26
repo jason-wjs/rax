@@ -82,6 +82,20 @@ def test_shell_profile_keeps_network_and_gpu_isolated(tmp_path):
         arguments(boundary, [])
 
 
+def test_shell_boundary_masks_credentials_outside_the_session(tmp_path):
+    key = private_key(tmp_path)
+    root = tmp_path/'sessions/run'
+    root.mkdir(parents=True)
+    login = root/'agent-login.json'
+    login.write_text(json.dumps({'key_file': str(key), 'auth_home': str(tmp_path/'account')}))
+    config = configuration(root)
+    deployed = {'workspace': root/'workspace', 'login': login}
+    profile = dsh.boundary(config, deployed, root/'socket/mcp.sock')
+    assert str(key.resolve()) in profile['hidden']
+    assert str((tmp_path/'account').resolve()) in profile['hidden']
+    assert key.read_text() not in json.dumps(profile)
+
+
 def test_resume_identity_and_usage_keep_native_step_and_cache_semantics(tmp_path):
     dsh.capture_event(tmp_path, json.dumps({'type':'session','sessionId':'session-unique'}))
     native = {'type':'status','phase':'step_end','turn':1,'step':1,

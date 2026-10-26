@@ -30,16 +30,16 @@ from services.transfer import PARTS, transfer_size
 IMAGE_REPLY_GUIDANCE = (' Returns text/image content blocks. In functions.exec, iterate reply.content: '
                         'use text(block.text) for text blocks and image(block) for selected image blocks. '
                         'Never text(reply) or stringify image data.')
-# Claude Code shows image blocks in the tool result directly; functions.exec is Codex's.
-CLAUDE_IMAGE_REPLY_GUIDANCE = (' Returns text/image content blocks; images appear directly in the tool result. '
-                               'Never print or stringify image data.')
+# The other CLIs display MCP image blocks directly; functions.exec is Codex's.
+NATIVE_IMAGE_REPLY_GUIDANCE = (' Returns text/image content blocks; images appear directly in the tool result. '
+                              'Never print or stringify image data.')
 
 
 def for_cli(tools, cli):
     """Tool definitions with image guidance for the agent CLI that reads them."""
-    if cli != 'claude':
+    if cli == 'codex':
         return tools
-    return [{**tool, 'description': tool['description'].replace(IMAGE_REPLY_GUIDANCE, CLAUDE_IMAGE_REPLY_GUIDANCE)}
+    return [{**tool, 'description': tool['description'].replace(IMAGE_REPLY_GUIDANCE, NATIVE_IMAGE_REPLY_GUIDANCE)}
             for tool in tools]
 
 

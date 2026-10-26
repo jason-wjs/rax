@@ -159,14 +159,12 @@ class Configuration:
         bench.validate_config(self)
         if self.task_rules not in TASK_RULES:
             raise ValueError(f'task_rules must be one of {TASK_RULES}')
-        from harness.backends import NAMES, PROVIDERS
+        from harness.backends import NAMES, PROVIDERS, provider_choices
         if self.agent_cli not in NAMES:
             raise ValueError(f'agent_cli must be one of {NAMES}')
         if type(self.external_perception) is not bool:
             raise ValueError('external_perception must be boolean')
-        providers = ('openrouter', 'deepseek-api', 'deepseek-account', 'custom') if self.agent_cli == 'dsh' else (
-            'openrouter', 'claude-login', 'anthropic', 'custom')
-        providers = PROVIDERS.get(self.agent_cli, providers)
+        providers = provider_choices(self.agent_cli)
         if self.agent_provider not in providers:
             raise ValueError(f'agent_provider must be one of {providers}')
         if self.agent_cli == 'dsh' and (self.agent_formal or self.adaptation_source or self.subagents or self.exploration_envs != 1):

@@ -176,14 +176,15 @@ class ResearchSessions:
         from services.controller.config import TASK_RULES
         if values['task_rules'] not in TASK_RULES:
             raise ValueError('Invalid task_rules')
-        from harness.backends import NAMES, PROVIDERS
+        from harness.backends import NAMES, PROVIDERS, provider_choices
         if values['agent_cli'] not in NAMES:
             raise ValueError(f'agent_cli must be one of {NAMES}')
-        providers = ('openrouter', 'deepseek-api', 'deepseek-account', 'custom') if values['agent_cli'] == 'dsh' else (
-            'openrouter', 'claude-login', 'anthropic', 'custom')
-        providers = PROVIDERS.get(values['agent_cli'], providers)
+        providers = provider_choices(values['agent_cli'])
         if values['agent_provider'] not in providers:
             raise ValueError('Invalid agent_provider')
+        if values['agent_cli'] in ('dsh', *PROVIDERS) and (values['agent_formal'] != 'off' or
+                values['adaptation_source'] or values['subagents'] or values['exploration_envs'] != 1):
+            raise ValueError(f"{values['agent_cli']} supports code formal, one environment, no adaptation or subagents")
         from services.controller.config import AGENT_EFFORTS
         if values['agent_effort'] not in AGENT_EFFORTS:
             raise ValueError('Invalid agent_effort')
@@ -383,7 +384,10 @@ class ResearchSessions:
         from harness.backends import PROVIDERS
         for name in PROVIDERS:
             if (directory/(name+'-home')).is_dir():
-                from services.native_cli_usage import UsageReader
+                if name == 'cursor':
+                    from services.cursor_usage import UsageReader
+                else:
+                    from services.native_cli_usage import UsageReader
                 usage = UsageReader().read(directory/(name+'-home'))
         return {**summary, 'command': self.command(directory),
                 'live_observation': self.live_observation(directory),
@@ -522,7 +526,9 @@ class ResearchSessions:
         if detail:
             # Launch/stop never act on sessions older than this server.
             detail['launchable'] = detail['launchable'] and not history
+        from harness.backends import NAMES, provider_choices
         return {'sessions': sessions, 'selected': detail,
+                'agent_providers': {name: list(provider_choices(name)) for name in NAMES},
                 'profile': profile, 'task_timeouts': {t: timeouts(t) for t in self.tasks()},
                 'tasks': self.tasks(), 'demonstration_contexts': list(DEMONSTRATION_CONTEXTS),
                 'benchmarks': {t: benchmark_of(t) for t in self.tasks()},

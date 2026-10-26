@@ -4,6 +4,7 @@ Claude Code runs as shipped, with the session's own CLAUDE_CONFIG_DIR and its na
 (login.py); its sandbox confines the agent's commands like Codex's (harness/agent_host.py).
 Everything else about a session is shared with the Codex launcher.
 """
+from contextlib import nullcontext
 import json
 import os
 from pathlib import Path
@@ -206,6 +207,8 @@ def settings(config, deployed, socket):
     # Claude Code checks the requested symlink spelling as well as its real target.
     read_paths = [*reads, *(workspace / relative for _, relative in reference_sources(config))]
     guarded = [str(path) for path in protected(workspace)]
+    key_file = login(deployed).get('key_file')
+    credentials = [str(Path(key_file).resolve())] if key_file else []
     rule = lambda tool, path: f'{tool}(/{path})'  # Absolute paths are written //like/this.
     return {
         'permissions': {
@@ -213,13 +216,15 @@ def settings(config, deployed, socket):
             # (autoAllowBashIfSandboxed). Anything else outside the workspace is not allowed.
             'defaultMode': 'acceptEdits',
             'allow': [f'mcp__{MCP_SERVER}', *(rule('Read', f'{path}/**') for path in read_paths)],
-            'deny': [*DENIED_TOOLS, *(rule('Edit', path) for path in guarded),
+            'deny': [*DENIED_TOOLS, *(rule('Read', path) for path in credentials),
+                     *(rule('Edit', path) for path in guarded),
                      *(rule('Edit', f'{path}/**') for path in guarded)]},
         'sandbox': {
             'enabled': True, 'failIfUnavailable': True, 'autoAllowBashIfSandboxed': True,
             'allowUnsandboxedCommands': False,
             'filesystem': {'allowWrite': [str(workspace), str(sockets)], 'denyWrite': guarded,
-                           'denyRead': [str(path) for path in agent_host.hidden_paths(config.root)],
+                           'denyRead': [*(str(path) for path in agent_host.hidden_paths(config.root)),
+                                        *credentials],
                            'allowRead': [str(workspace), str(sockets), *map(str, reads),
                                          *map(str, agent_host.reexposed_paths())]},
             # No internet (no domain is allowed); the robot socket is a Unix socket.
@@ -298,6 +303,9 @@ def agent_environment(config, deployed, socket):
         # One-hour prompt cache: agents often wait 5-30 minutes on rehearsals and episodes,
         # and a lapsed 5-minute cache re-writes the whole context.
         'ENABLE_PROMPT_CACHING_1H': '1', 'CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL': '1h'})
+    if deployed.get('model_relay'):
+        relay = deployed['model_relay']
+        environment.update(ANTHROPIC_BASE_URL=relay.base_url, ANTHROPIC_AUTH_TOKEN=relay.token)
     return environment
 
 
@@ -352,7 +360,15 @@ def launch(config, deployed, *, gemini_key_file=None, prompt, interactive=False,
     write_home(config, deployed, socket)
     relocate(deployed['claude_home'], deployed['workspace'])
     server = agent = None
-    with (config.root/'frontend.log').open('ab') as log:
+    value = login(deployed)
+    relay_context = nullcontext(None)
+    if value['provider'] == 'custom':
+        from harness.claude_cli.messages_relay import serve
+        relay_context = serve(credential=credential(deployed), model=value['model'],
+                              effort=config.agent_effort, audit=config.root/'claude-request-audit.jsonl')
+    with relay_context as relay, (config.root/'frontend.log').open('ab') as log:
+        if relay is not None:
+            deployed = {**deployed, 'model_relay': relay}
         try:
             server = start_frontend(config, deployed, socket, log, key_file=gemini_key_file)
 

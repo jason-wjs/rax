@@ -16,6 +16,9 @@ def boundary(config, deployed):
     env = dsh.agent_environment(config, deployed, socket)
     specification = {'outside': str(outside), 'repository': str(agent_host.PROJECT/'README.md'),
         'published': str(root/'published'), 'socket': str(socket), 'workspace': str(workspace)}
+    login = json.loads(Path(deployed['login']).read_text())
+    if login.get('key_file'):
+        specification['credential'] = login['key_file']
     code = '''
 import json,os,socket
 from pathlib import Path
@@ -26,6 +29,10 @@ for name in ('outside','repository'):
     try: Path(s[name]).read_text()
     except OSError: pass
     else: raise AssertionError('Private path readable: '+name)
+if s.get('credential'):
+    try: value=Path(s['credential']).read_bytes()
+    except OSError: pass
+    else: assert not value, 'Credential file readable'
 for path in (Path(s['outside']),Path(s['published'])/'forbidden.txt'):
     try: path.write_text('forbidden')
     except OSError: pass

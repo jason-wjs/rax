@@ -710,6 +710,10 @@ def main():
     parser.add_argument('--agent-base-url', help='Private model API base URL')
     parser.add_argument('--agent-auth-home', type=Path, help='Dedicated native agent account login directory')
     args = parser.parse_args()
+    for name in ('model', 'key_file', 'base_url'):
+        current, legacy = getattr(args, 'agent_' + name), getattr(args, 'claude_' + name)
+        if current is not None and legacy is not None and current != legacy:
+            parser.error(f'--agent-{name.replace("_", "-")} conflicts with --claude-{name.replace("_", "-")}')
     if args.prepare_only and (args.resume or args.formal_only or args.agent_formal):
         parser.error('--prepare-only checks a fresh deployment; it cannot be combined with --resume, '
                      '--formal-only or --agent-formal')
@@ -771,23 +775,24 @@ def main():
                 if args.agent_formal or args.formal_only:
                     raise ValueError(f'{config.agent_cli} supports code formal; live agent formal is not implemented')
             if args.resume:
-                if config.agent_cli == 'claude' and config.agent_provider == 'claude-login' and not args.claude_key_file:
+                if config.agent_cli == 'claude' and config.agent_provider == 'claude-login' and not (args.agent_key_file or args.claude_key_file):
                     claude.preflight_login()  # The token may have been revoked since the first launch.
                 deployed = (external_cli.redeploy(config, binary=args.agent_binary) if config.agent_cli not in ('codex', 'claude') else
-                            claude.redeploy(config) if config.agent_cli == 'claude' else redeploy(config))
+                            claude.redeploy(config, claude=args.agent_binary) if config.agent_cli == 'claude' else redeploy(config))
             elif config.agent_cli not in ('codex', 'claude'):
                 deployed = external_cli.deploy(config, binary=args.agent_binary, model=args.agent_model,
                     key_file=args.agent_key_file or args.key_file, base_url=args.agent_base_url,
                     auth_home=args.agent_auth_home)
             elif config.agent_cli == 'claude':
                 provider = config.agent_provider
-                key_file = {'openrouter': args.key_file, 'anthropic': args.claude_key_file,
+                key_file = args.agent_key_file or {'openrouter': args.key_file, 'anthropic': args.claude_key_file,
                             'claude-login': args.claude_key_file, 'custom': args.claude_key_file}[provider]
-                if provider == 'claude-login' and not args.claude_key_file:
+                if provider == 'claude-login' and not key_file:
                     # Fail before provisioning if the experiment token is missing or rejected.
                     claude.preflight_login()
-                deployed = claude.deploy(config, provider=provider, model=args.claude_model, key_file=key_file,
-                                        base_url=args.claude_base_url)
+                deployed = claude.deploy(config, provider=provider, model=args.agent_model or args.claude_model,
+                                        key_file=key_file, claude=args.agent_binary,
+                                        base_url=args.agent_base_url or args.claude_base_url)
             else:
                 deployed = deploy(config, provider_home=args.provider_home, profile=args.profile, key_file=args.key_file)
             if args.prepare_only:
