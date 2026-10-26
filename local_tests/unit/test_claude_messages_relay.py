@@ -132,9 +132,12 @@ def test_native_read_and_shell_cannot_reach_external_key_symlink(sandbox_runtime
                              "Path('key-boundary.json').write_text(json.dumps(r)); print('boundary saved')"
                     blocks = [{'type': 'tool_use', 'id': 'shell-canary', 'name': 'Bash',
                                'input': {'command': 'python -c ' + shlex.quote(script), 'description': 'check credential boundary'}}]
+                elif turns == 2:
+                    blocks = [{'type': 'tool_use', 'id': 'deferred-audit', 'name': 'ToolSearch',
+                        'input': {'query': 'select:Agent,Task,Workflow,RunWorkflow,ScheduleWakeup,ListAgents,ListPeers,CronCreate,RemoteTrigger,Monitor,SendMessage,Skill,DesignSync,EnterWorktree,ExitWorktree,mcp__auto_research__status', 'max_results': 20}}]
                 else:
                     blocks = [{'type': 'text', 'text': 'done'}]
-                stop = 'tool_use' if turns < 2 else 'end_turn'
+                stop = 'tool_use' if turns < 3 else 'end_turn'
             data = sse(blocks, stop, str(len(received)))
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream')
@@ -153,10 +156,16 @@ def test_native_read_and_shell_cannot_reach_external_key_symlink(sandbox_runtime
         assert result.returncode == 0, result.stderr[-1000:]
         for request in received:
             advertised = {tool['name'] for tool in request.get('tools', [])}
-            assert not advertised.intersection({'Agent', 'Task', 'Workflow', 'ScheduleWakeup', 'WebFetch', 'WebSearch'})
+            assert not advertised.intersection({'Agent', 'Task', 'Workflow', 'ScheduleWakeup',
+                'CronCreate', 'Monitor', 'ListAgents', 'SendMessage', 'Skill', 'WebFetch', 'WebSearch',
+                'DesignSync', 'EnterWorktree', 'ExitWorktree'})
         results = [b for m in received[-1]['messages'] if isinstance(m['content'], list)
                    for b in m['content'] if b.get('type') == 'tool_result']
         assert results[0]['tool_use_id'] == 'read-canary' and results[0].get('is_error')
+        searched = next(block for block in results if block['tool_use_id'] == 'deferred-audit')
+        references = {item['tool_name'] for item in searched.get('content', [])
+                      if isinstance(item, dict) and item.get('type') == 'tool_reference'}
+        assert references == {'mcp__auto_research__status'}
         assert 'fixture-external-credential-canary' not in json.dumps(results[0])
         boundary = json.loads((deployed['workspace']/'key-boundary.json').read_text())
         assert boundary == {'real_key_in_environment': False, 'key_readable': False}

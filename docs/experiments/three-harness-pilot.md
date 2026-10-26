@@ -90,6 +90,14 @@ submission status, success rate when available, active time, model and tool time
 reported tokens/cache, compaction events and interruption reasons. Cursor result
 usage is per completed turn; it is not a count of individual model requests.
 
+The custom DeepSeek gateway's cache-accounting semantics are not yet verified.
+Preserve its raw `input_tokens`, `cache_read_input_tokens`,
+`cache_creation_input_tokens` and `output_tokens` fields. Native Claude and DSH
+usage conversion assumes Anthropic input excludes cache; the observed gateway
+values may instead include it. Do not use those converted totals as verified
+billable tokens or draw cross-harness cost conclusions from them. Separate
+completed responses from interrupted streams and report missing usage explicitly.
+
 ## Current integration limits
 
 DSH and Claude Code have passed live image/tool/shell/resume/max-effort checks

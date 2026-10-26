@@ -26,9 +26,11 @@ HOME_KEY, HOME_NAME = 'claude_home', 'claude-home'
 HOME_FILES = ('settings.json', 'mcp.json', '.claude.json')
 MCP_SERVER = 'auto_research'
 # The agent works offline: its commands have no internet, and neither have its tools.
-DENIED_TOOLS = ('WebFetch', 'WebSearch')
-# Workflow launches agents independently; ScheduleWakeup creates later autonomous turns.
-SUBAGENT_TOOLS = ('Agent', 'Task', 'Workflow', 'ScheduleWakeup')
+DENIED_TOOLS = ('WebFetch', 'WebSearch', 'DesignSync', 'EnterWorktree', 'ExitWorktree')
+# Native/deferred routes that fork work, schedule turns, or cross into other sessions.
+# Skill can execute context:fork directly; skill Markdown remains available through Read.
+SUBAGENT_TOOLS = ('Agent', 'Task', 'Workflow', 'ScheduleWakeup', 'CronCreate',
+                  'Monitor', 'ListAgents', 'SendMessage', 'Skill')
 EFFORT = 'xhigh'  # When a deployment predates agent_effort.
 # Compact near this many tokens instead of the model's 1M window: every call re-reads the
 # whole context, and an expired cache re-writes all of it.
