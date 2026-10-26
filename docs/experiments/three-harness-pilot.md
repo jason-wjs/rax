@@ -59,6 +59,14 @@ DeepSeek model. The custom Messages transport keeps the real key on the host,
 normalizes nested tool images and records request metadata, response usage and
 timing without logging credentials or prompt contents.
 
+The DSH transport also records the returned model identifier, response timing and
+raw provider usage. Responses are correlated by request ID in a separate
+`dsh-home/response-audit.jsonl`, preserving the existing request-count format.
+Its first-byte measurement is client-observed body availability, not network-only
+latency. A provider message-end marker establishes model completion even when
+the native client then closes the stream. Missing end records after a process
+kill remain unfinished; raw usage is not converted into billing estimates.
+
 For Cursor use `--agent-cli cursor --agent-provider cursor-account
 --agent-effort xhigh`. At launch use the requested model string above, a verified
 project-local CLI binary and, optionally, `--agent-auth-home` pointing to the
