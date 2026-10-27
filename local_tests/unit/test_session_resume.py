@@ -150,14 +150,18 @@ def test_a_failed_agent_is_not_relaunched_once_exploration_is_closed():
     assert code == 1 and len(calls) == 1 and pauses == [] and 'agent_errors' not in lifecycle
 
 
-def test_no_relaunch_without_a_conversation():
+@pytest.mark.parametrize('returncode', [0, 1])
+@pytest.mark.parametrize('raises', [True, False])
+def test_no_relaunch_without_a_conversation(returncode, raises):
     def missing():
-        raise RuntimeError('none')
-    calls = []
-    code = launcher.run_agent(lambda p: calls.append(p) or 0, deployed={}, prompt='go',
+        if raises:
+            raise RuntimeError('none')
+        return None
+    calls, pauses = [], []
+    code = launcher.run_agent(lambda p: calls.append(p) or returncode, deployed={}, prompt='go',
                               interactive=False, open_exploration=lambda: True, latest=missing,
-                              lifecycle={}, save=lambda: None)
-    assert code == 0 and calls == ['go']
+                              lifecycle={}, save=lambda: None, sleep=pauses.append)
+    assert code == returncode and calls == ['go'] and pauses == []
 
 
 def test_resume_recovers_episodes_left_live_and_returns_their_budget(tmp_path):

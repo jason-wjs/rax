@@ -601,9 +601,12 @@ def run_agent(start, *, deployed, prompt, interactive, open_exploration, latest,
                 return returncode
             next_prompt = CONTINUE_PROMPT
         try:
-            deployed['resume_session'] = latest()
+            session = latest()
         except (RuntimeError, OSError, TypeError):
             return returncode  # No conversation to continue.
+        if not session:
+            return returncode
+        deployed['resume_session'] = session
         if returncode != 0:
             sleep(ERROR_PAUSE_SECONDS)
         else:
