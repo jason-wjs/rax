@@ -10,6 +10,7 @@ import selectors
 import socket
 import sys
 import threading
+import time
 import uuid
 
 from .backend import make_backend
@@ -393,6 +394,44 @@ class ResearchFrontend:
         An idle Codex connection must not block a Python client. Evaluation calls
         occupy this dispatcher, so development cannot act on their private episode.
         """
+        transport_path = self.s.config.root/'mcp-transport.jsonl'
+        connections, sequences, current = {}, {}, {}
+
+        def audit(event, connection, **metadata):
+            # Only selected RPC metadata; never request arguments or response bodies.
+            row = {'time': time.time(), 'event': event, 'connection': connections[connection],
+                   'sequence': sequences[connection], **current.get(connection, {}), **metadata}
+            try:
+                fd = os.open(transport_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+                with os.fdopen(fd, 'w') as stream:
+                    stream.write(json.dumps(row, allow_nan=False) + '\n')
+            except (OSError, TypeError, ValueError):
+                # Observation must not change the existing RPC execution/response path.
+                print('Could not write MCP transport metadata', file=sys.stderr)
+
+        def received(connection, request):
+            request = request if isinstance(request, dict) else {}
+            metadata = {'method': request.get('method'), 'id': request.get('id')}
+            current[connection] = {'request_id': request.get('id')}
+            params = request.get('params')
+            params = params if isinstance(params, dict) else {}
+            if request.get('method') == 'tools/call':
+                metadata['tool'] = params.get('name')
+            elif request.get('method') == 'notifications/cancelled':
+                reason = params.get('reason')
+                reason = reason if isinstance(reason, str) else ''
+                lower = reason.lower()
+                category = ('request_timeout' if '-32001' in lower and 'request timed out' in lower
+                            else 'aborted' if 'aborterror' in lower or lower.startswith('aborted') else 'other')
+                metadata.update(cancel_request_id=params.get('requestId'), cancel_reason=category,
+                                cancel_reason_length=len(reason))
+            audit('received', connection, **metadata)
+
+        def response_metadata(response):
+            return {'response_id': response.get('id') if isinstance(response, dict) else None,
+                    'error_code': (response.get('error') or {}).get('code')
+                    if isinstance(response, dict) and isinstance(response.get('error'), dict) else None}
+
         listener.setblocking(False)
         with selectors.DefaultSelector() as poll:
             poll.register(listener, selectors.EVENT_READ)
@@ -411,6 +450,7 @@ class ResearchFrontend:
                                 continue
                             client.setblocking(False)
                             buffers[client] = bytearray()
+                            connections[client], sequences[client] = uuid.uuid4().hex, 0
                             poll.register(client, selectors.EVENT_READ)
                             continue
                         try:
@@ -424,23 +464,40 @@ class ResearchFrontend:
                             while b'\n' in pending:
                                 line, _, tail = pending.partition(b'\n')
                                 pending[:] = tail
+                                sequences[connection] += 1
                                 try:
                                     request = json.loads(line)
                                 except (ValueError, UnicodeError):
+                                    received(connection, None)
                                     response = {'jsonrpc': '2.0', 'id': None,
                                         'error': {'code': -32700, 'message': 'Invalid request'}}
                                 else:
+                                    received(connection, request)
                                     response = self.handle(request)
+                                current[connection].update(response_metadata(response))
+                                audit('handled', connection)
                                 if response is not None:
                                     connection.settimeout(5)
-                                    connection.sendall(json.dumps(response, allow_nan=False).encode() + b'\n')
+                                    encoded = json.dumps(response, allow_nan=False).encode() + b'\n'
+                                    try:
+                                        connection.sendall(encoded)
+                                    except (ConnectionError, OSError) as error:
+                                        audit('send_error', connection, bytes=len(encoded),
+                                              exception_type=type(error).__name__)
+                                        raise
+                                    audit('response_sent', connection, bytes=len(encoded))
                                     connection.setblocking(False)
-                        except (ConnectionError, OSError):
+                        except (ConnectionError, OSError) as error:
+                            audit('connection_closed', connection, exception_type=type(error).__name__)
                             poll.unregister(connection)
                             buffers.pop(connection, None)
+                            connections.pop(connection, None)
+                            sequences.pop(connection, None)
+                            current.pop(connection, None)
                             connection.close()
             finally:
                 for client in buffers:
+                    audit('connection_closed', client, exception_type=None, reason='server_shutdown')
                     client.close()
 
     def serve(self, reader, writer):

@@ -204,6 +204,78 @@ def test_socket_clients_are_serialized_and_bad_json_does_not_stop_server(live_en
         assert data(agent.call('status'))['exploration_remaining'] == 2
 
 
+def test_socket_transport_audit_records_ids_and_cancel_metadata_without_payloads(live_endpoint):
+    _, _, workspace, _, path = live_endpoint
+    canary = 'sk-transport-private-canary-not-a-real-key'
+    reasons = ['McpError: MCP error -32001: Request timed out ' + canary,
+               'AbortError: ' + canary, canary]
+    wire_sizes, images = [], []
+    with socket.socket(socket.AF_UNIX) as connection:
+        connection.settimeout(15)
+        connection.connect(str(path))
+        with connection.makefile('rb') as reader:
+            requests = [
+                {'jsonrpc': '2.0', 'id': 7, 'method': 'tools/call',
+                 'params': {'name': 'start_episode', 'arguments': {}, '_meta': {'private': canary}}},
+                {'jsonrpc': '2.0', 'id': 8, 'method': 'tools/call',
+                 'params': {'name': 'status', 'arguments': {'private': canary}}},
+                *[{'jsonrpc': '2.0', 'method': 'notifications/cancelled',
+                   'params': {'requestId': 7, 'reason': reason}} for reason in reasons]]
+            for index, request in enumerate(requests):
+                connection.sendall(json.dumps(request).encode() + b'\n')
+                raw = reader.readline()
+                wire_sizes.append(len(raw))
+                reply = json.loads(raw)
+                assert reply['id'] == request.get('id')
+                if index == 0:
+                    images = [b['data'] for b in reply['result']['content'] if b['type'] == 'image']
+                    assert images
+                if index >= 2:  # Preserve the existing unsupported-notification response.
+                    assert reply['error']['code'] == -32000
+            connection.sendall(canary.encode() + b'\n')
+            raw = reader.readline()
+            wire_sizes.append(len(raw))
+            assert json.loads(raw)['error']['code'] == -32700
+    with socket.socket(socket.AF_UNIX) as disconnected:
+        disconnected.connect(str(path))
+        disconnected.shutdown(socket.SHUT_RD)
+        disconnected.sendall(json.dumps({'jsonrpc': '2.0', 'id': 99, 'method': 'tools/call',
+            'params': {'name': 'status', 'arguments': {}}}).encode() + b'\n')
+    with client(path) as other:
+        assert 'exploration_remaining' in data(other.call('status'))
+    audit_path = workspace.parent/'mcp-transport.jsonl'
+    until = time.monotonic() + 2
+    while time.monotonic() < until:
+        rows = [json.loads(line) for line in audit_path.read_text().splitlines()]
+        if (sum(r['event'] == 'response_sent' for r in rows) == 7
+                and sum(r['event'] == 'connection_closed' for r in rows) == 3):
+            break
+        time.sleep(.01)
+    assert audit_path.stat().st_mode & 0o777 == 0o600
+    raw = audit_path.read_text()
+    assert canary not in raw and 'arguments' not in raw and 'content' not in raw
+    assert all(image not in raw for image in images)
+    first_connection = rows[0]['connection']
+    first = [r for r in rows if r['connection'] == first_connection]
+    assert [r['bytes'] for r in first if r['event'] == 'response_sent'] == wire_sizes
+    received = [r for r in first if r['event'] == 'received']
+    assert [(r['id'], r.get('tool')) for r in received[:2]] == [(7, 'start_episode'), (8, 'status')]
+    cancelled = received[2:5]
+    assert [r['cancel_reason'] for r in cancelled] == ['request_timeout', 'aborted', 'other']
+    assert [r['cancel_reason_length'] for r in cancelled] == list(map(len, reasons))
+    assert all(r['cancel_request_id'] == 7 for r in cancelled)
+    assert len({r['connection'] for r in rows}) == 3
+    failed = [r for r in rows if r.get('request_id') == 99]
+    assert [r['event'] for r in failed] == ['received', 'handled', 'send_error', 'connection_closed']
+    assert failed[2]['exception_type'] == failed[3]['exception_type'] == 'BrokenPipeError'
+    assert failed[2]['response_id'] == failed[3]['response_id'] == 99
+    assert failed[2]['bytes'] > 0
+    for sequence in range(1, 7):
+        events = [r for r in first if r['sequence'] == sequence and r['event'] != 'connection_closed']
+        assert [r['event'] for r in events] == ['received', 'handled', 'response_sent']
+        assert [r['time'] for r in events] == sorted(r['time'] for r in events)
+
+
 def test_ordinary_python_full_script_recording_and_agent_handoff(live_endpoint):
     _, root, workspace, published, path = live_endpoint
     # The agent's own Python, as its CLI runs it: in its workspace, with the robot socket.
