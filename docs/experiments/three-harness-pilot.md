@@ -7,7 +7,8 @@ and compare both complete agent configurations with Cursor/Grok. Preserve the
 official simulator, robot interface, layout split and scoring. This phase supports
 the eleven standard DexJoCo tasks in native, single-agent, single-environment,
 code-formal mode. Live-agent formal evaluation, subagents and other benchmarks
-are outside this pilot.
+are outside this pilot. Configuration covers those eleven tasks; the end-to-end
+integration acceptance reported below exercises Click Mouse only.
 
 | Harness | Provider | Requested model | Effort |
 | --- | --- | --- | --- |
@@ -106,44 +107,94 @@ values may instead include it. Do not use those converted totals as verified
 billable tokens or draw cross-harness cost conclusions from them. Separate
 completed responses from interrupted streams and report missing usage explicitly.
 
-## Current integration limits
+## Current integration evidence and limits
 
-DSH and Claude Code have passed live image/tool/shell/resume/max-effort checks
-against the selected custom relay. All eleven simulator doctors pass. Goal-image
-preparation and full task trials have separate machine-local progress records.
+All eleven simulator doctors pass. DSH and Claude Code passed live image/tool,
+shell, resume and max-effort checks against the selected relay. Their earlier
+bounded task-solving trials did not submit a controller; those runs therefore
+have no held-out success rate. Do not turn a missing submission into a scored 0%.
 
-Cursor has two unresolved gates. With a fresh private config directory, the
-official `sandbox run` command in CLI `2026.10.22-27dcf5f` reports a `system` read
-boundary even when the config requests `workspace`. The official `--list-models`
-and `status` commands return successfully but do not populate the account identity
-or feature cache needed by that command. The launcher tests the effective boundary
-and aborts before starting the frontend or model when isolation fails. Rewriting
-an existing session preserves only the vendor's supported `authInfo` identity
-fields; it neither creates identity nor overrides feature flags.
+The 2026-10-27 check uses the separate procedure in
+`native-integration-acceptance.md`. It explicitly asks the native agent to write
+its own minimal hold controller and exercise registration, rehearsal, submission,
+freezing and formal scoring. Its results establish workflow integration, not
+robot-task-solving capability, and must not be pooled with benchmark results.
 
-The account's catalog advertises a 500k window, xhigh and Fast, but returns only
-one parameterized variant: `context=256k,reasoning_effort=high,fast=true`. CLI
-`2026.10.19-6bbf2c4` rejected the requested bracket selection; a persisted-config
-probe instead resolved to High/Fast with `maxMode=false`. One bounded requested
-configuration probe on `2026.10.22-27dcf5f` timed out before model initialization.
-Source inspection shows that a legacy xhigh/Fast alias plus persisted `maxMode`
-still passes through parameter sanitization against that catalog; it does not
-establish xhigh/500k. This is not enough evidence to attribute the failure to
-subscription entitlement, and no reduced-setting run counts as acceptance.
+Claude Code 2.1.310 with requested `deepseek-v4.1-flash` / `max` completed this
+check on Click Mouse: three complete and valid formal outcomes, zero task
+successes, no formal execution or infrastructure errors. The relay returned
+`deepseek-v4-1-flash-260910`. An initial rehearsal exposed system bubblewrap
+0.6.1 lacking `--size`; the project launch environment now resolves the already
+installed compatible binary. The agent resumed its native conversation and
+submitted the same unchanged controller. Total active time, including the failed
+attempt, was 612.931 seconds. No task-success requirement or scoring rule changed
+inside the benchmark.
 
-Direct tests of the unmodified native sandbox helper, using a policy translated
-from the generated project config, permit published-result reads, agent Python
-and the robot Unix socket while denying private files, credentials, network,
-host processes and GPU access. Those tests do not establish actual-agent policy
-propagation or native Read-tool enforcement. Machine-local evidence is recorded
-in `experiments/cursor-offline-boundary.json`,
-`experiments/cursor-native-policy-boundary.json`,
-`experiments/cursor-fresh-preflight.json` and
-`experiments/cursor-static-contract.json`. The fresh-home preflight check uses an
-empty account fixture and confirms that the real CLI reports the broad boundary,
-executes the private-file assertion and stops before any frontend or model starts. Until the effective startup boundary
-and requested model settings both pass, the Cursor robotics trial remains
-unstarted.
+Cursor CLI 2026.10.22-27dcf5f requires official account/feature initialization in
+its fresh private config directory. The adapter now uses ACP `initialize` and
+`authenticate(cursor_login)` before checking model metadata.
+Its model catalog also needs to be ready: native `--model` resolution can fall
+back to the legacy list when the parameterized catalog misses its two-second
+loading window. The failed run directly evidenced a legacy-only rejection; it
+did not record the model fetch timing, so a specific two-second timeout on that
+request is not established. Authentication alone does not establish catalog readiness.
+The adapter creates an empty official ACP configuration session with the supported
+parameterized-model-picker client capability, waits for the full catalog, selects
+the requested model/context/effort/Fast options and verifies the returned options
+and vendor-written persisted selection. It sends no `session/prompt` and does not
+copy caches or override vendor feature gates. The native CLI then uses that saved
+selection rather than reparsing `--model`; actual `system/init` must still match.
+The metadata session is not the native experiment conversation.
+It then verifies the effective workspace read boundary before starting the model.
+The canary tests denied file contents rather than treating visible `/proc`
+metadata as readable contents.
+
+Cursor also discovers the project through the nearest `.git` marker. An invalid
+ancestor marker on the test host hid RAX's workspace MCP configuration. Each newly
+created Cursor agent workspace now has its own Git root; `.git` and `.cursor`
+are protected against model writes. The adapter approves only its `auto_research`
+MCP through the official CLI and preserves native tool permissions.
+
+A real generation selected `Grok 4.7 500K Extra High Fast`, with persisted
+`context=500k`, `reasoning_effort=xhigh`, `fast=true` and `maxMode=true`. The adapter
+checks native initialization and stored selection and rejects a silent change.
+This verifies the selected mode; it does not stress-test a 500k-token input.
+Earlier catalog and selection failures remain historical evidence, not a claim
+that this account or model can only support 256k/High/Fast. Available model metadata differed between observations; those records did not
+isolate catalog loading, picker representation or server-side availability as
+the cause of every earlier selection failure.
+
+The adapter must not add `Shell(*)` to `permissions.allow`. Cursor treats an
+allowlisted shell command as approved to run outside its sandbox, even when
+sandbox mode is enabled. Removing that entry retains deterministic Allowlist
+mode and sends supported commands through the native sandbox; no Auto-review
+classifier or extra model is enabled. The actual native Shell canary, rather
+than only `agent sandbox run`, must confirm these restrictions.
+
+A startup failure before the native conversation ID now exits immediately. The
+shared launcher no longer waits and retries a new session with a continuation
+prompt when `latest_session` returns no conversation. Existing valid-session
+resume behavior is unchanged.
+
+Cursor completed the same Click Mouse workflow only after an operator-directed
+recovery. The original frozen controller had four healthy rehearsals, but the
+native CLI reconnected/retried without completing the long `rehearse` tool reply
+while RAX suspended the whole client with SIGSTOP. The exact first triggering
+timer is unproven. A single bounded metadata probe did not resolve that cause.
+A subsequent instruction resumed the same native conversation, required `status`
+confirmation of the existing rehearsal qualification and asked the agent to
+submit that unchanged bundle. The agent itself called `status` and `submit`, then
+ended its turn. The original driver ran all three formal layouts: complete and
+valid native outcomes, zero successes, zero execution/infrastructure errors.
+
+Total active time including prior failed attempts and the diagnostic probe was
+1672.123 seconds. The independent audit passed 29 checks; one agent-registered
+controller and one system overall checkpoint are distinct stored entries.
+This is `passed_with_directed_recovery`, not an unattended adapter acceptance.
+The long synchronous MCP response problem remains unresolved. No asynchronous
+protocol, vendor timeout patch, operator submission or scoring change was made.
+Do not present these passive-controller 0/3 outcomes as model capability scores.
+See `integration-repair-results-20261027.md` for the bounded result record.
 
 Keep source and sanitized evidence in Git; environments, account files, real API
 keys, full transcripts, recordings and operator manifests stay outside it.

@@ -46,7 +46,20 @@ model, effort, context and Fast settings and the actual native isolation boundar
 before a robotics run. An advertised catalog option or adapter unit test does not
 establish that those settings or boundaries took effect.
 
-The two-hour cap includes model waits, tools, repairs and formal work. A repeated
+For the native Cursor CLI, leave shell commands out of `permissions.allow` while
+keeping Allowlist mode and sandboxing enabled. Explicit shell allowlisting means
+permission to execute outside Cursor's sandbox. Check actual model-issued Shell
+calls as well as `agent sandbox run`; the latter alone cannot detect a bypass
+caused by tool approval policy. Use nonsecret fixtures to verify permitted public
+reads, denied private contents, readonly control files, and blocked network/GPU
+access. Do not enable `--force`, unrestricted mode or an extra Auto-review model
+to bypass a failing check. See the official
+[Run Modes documentation](https://cursor.com/docs/agent/security/run-modes).
+
+
+The two-hour active-run cap includes model waits, tools, actual retry attempts
+and formal work. Offline code inspection, editing and decision waits are excluded
+and recorded separately; active time is not an end-to-end latency comparison. A repeated
 attempt uses only the remaining cumulative budget. The experiment supervisor
 must retain process and budget records and clean up only its own descendants.
 Do not restart automatically or extend the budget after a failure.
@@ -87,3 +100,21 @@ missing scores, an early-return incomplete native episode, or a process exit cod
 of zero alone does not. Keep integration outcomes separate from benchmark trials
 and preserve the exact prompt, source commit, CLI version, model settings, raw
 usage semantics and result evidence.
+
+## Recovery and incomplete adapter acceptance
+
+Record any operator recovery instruction separately from the initial prompt. A
+completed formal batch after such an instruction establishes that the submitted
+program and formal driver work, but it does not repair the interrupted tool
+round trip or establish unattended operation. Preserve prior failures and the
+cumulative active budget; the agent must still check the official qualification
+and submit the exact frozen controller itself.
+
+In the 2026-10-27 Cursor run, whole-client SIGSTOP during a long rehearsal caused
+observed reconnect/retry behavior, and the native agent did not receive completed
+rehearsal replies. Directed same-session `status` then `submit` recovered the
+workflow. Mark `unattended_full_adapter_passed=false` and
+`long_mcp_transport_fixed=false` until a normal long rehearsal returns to the
+agent and it proceeds without that intervention. Any asynchronous replacement
+must independently validate the experiment's tool/isolation boundary and disclose
+the changed protocol rather than claim equivalence with whole-process freezing.
