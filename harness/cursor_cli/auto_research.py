@@ -82,7 +82,9 @@ def write_home(config, deployed, socket=None):
         kept=(workspace, config.root/'published', socket.parent,
               *(source for source, _ in reference_sources(config)))))]
     permissions = {
-        'allow': ['Shell(*)', f'Read({workspace}/**)', f'Write({workspace}/**)',
+        # Cursor runs explicitly allowlisted shell commands outside its sandbox.
+        # Unlisted commands use the enabled workspace sandbox and its policy.
+        'allow': [f'Read({workspace}/**)', f'Write({workspace}/**)',
                   'Mcp(auto_research:*)', *(f'Read({path}/**)' for path in reads)],
         'deny': ['WebFetch(*)', *(rule for path in private for rule in (f'Read({path})', f'Read({path}/**)')),
                  *(rule for path in (*private, str(workspace/'.cursor'), str(workspace/'.git'))

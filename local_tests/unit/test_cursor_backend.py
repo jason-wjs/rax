@@ -101,6 +101,20 @@ def test_workspace_policy_protects_account_and_controls(deployed):
     assert '-I' in mcp['args']
 
 
+def test_shell_allowlist_cannot_escalate_native_execution_outside_sandbox(deployed):
+    config, value, _, _ = deployed
+    for path in (value[cursor.HOME_KEY]/'cli-config.json', value['workspace']/'.cursor/cli.json'):
+        settings = json.loads(path.read_text())
+        assert not any(rule.lstrip().startswith('Shell(') for rule in settings['permissions']['allow'])
+    global_settings = json.loads((value[cursor.HOME_KEY]/'cli-config.json').read_text())
+    assert global_settings['approvalMode'] == 'allowlist'
+    assert global_settings['sandbox']['mode'] == 'enabled'
+    assert global_settings['sandbox']['readBoundary'] == 'workspace'
+    command = cursor.agent_command(config, value, prompt='Run within native sandbox')
+    assert '--force' not in command and '--auto-review' not in command
+    assert command[command.index('--sandbox')+1] == 'enabled'
+
+
 def test_account_is_referenced_without_copying_or_inherited_api_credentials(deployed, monkeypatch):
     config, value, auth, _ = deployed
     for name in ('CURSOR_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'DEEPSEEK_API_KEY', 'HTTP_PROXY'):
