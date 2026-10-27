@@ -198,3 +198,13 @@ See `integration-repair-results-20261027.md` for the bounded result record.
 
 Keep source and sanitized evidence in Git; environments, account files, real API
 keys, full transcripts, recordings and operator manifests stay outside it.
+
+## Protocol decision — 2026-10-27
+
+The user selected the original synchronous whole-agent pause protocol. Cursor
+long-rehearsal support is temporarily **blocked**; no asynchronous protocol is
+authorized or implemented. No additional Cursor long-rehearsal trials or
+automatic retries are scheduled in this phase. Preserve the completed formal
+results as workflow completion with operator-directed recovery, not unattended
+adapter acceptance. Reassessment requires new compatible evidence and a
+subsequent user instruction.

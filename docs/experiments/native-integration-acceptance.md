@@ -118,3 +118,13 @@ workflow. Mark `unattended_full_adapter_passed=false` and
 agent and it proceeds without that intervention. Any asynchronous replacement
 must independently validate the experiment's tool/isolation boundary and disclose
 the changed protocol rather than claim equivalence with whole-process freezing.
+
+## Protocol decision — 2026-10-27
+
+The user selected the original synchronous whole-agent pause protocol. Cursor
+long-rehearsal support is temporarily **blocked**; no asynchronous protocol is
+authorized or implemented. No additional Cursor long-rehearsal trials or
+automatic retries are scheduled in this phase. Preserve the completed formal
+results as workflow completion with operator-directed recovery, not unattended
+adapter acceptance. Reassessment requires new compatible evidence and a
+subsequent user instruction.
