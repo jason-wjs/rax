@@ -30,6 +30,8 @@ RESULT = {'type': 'result', 'subtype': 'success', 'is_error': False,
 
 @pytest.fixture
 def deployed(tmp_path, monkeypatch):
+    # Cursor's ancestor scan accepts even a .git directory that Git rejects.
+    (tmp_path/'.git').mkdir()
     config = replace(configuration(tmp_path), agent_cli='cursor',
                      agent_provider='cursor-account', agent_effort='xhigh')
     config.root.mkdir()
@@ -68,6 +70,7 @@ def test_command_keeps_requested_model_and_resumes_recorded_session(deployed):
     assert command[command.index('--output-format')+1] == 'stream-json'
     assert command[-2:] == ['--', 'Start robot work']
     assert '--resume' not in command
+    assert '--approve-mcps' not in command
     value['resume_session'] = SESSION
     command = cursor.agent_command(config, value, prompt='Continue')
     assert command[command.index('--resume')+1] == SESSION
@@ -84,10 +87,11 @@ def test_workspace_policy_protects_account_and_controls(deployed):
     for path in (auth, home, secret):
         assert f'Read({path})' in policy['deny']
         assert f'Read({path}/**)' in policy['deny']
-    for path in (auth, home, secret, workspace/'.cursor'):
+    for path in (auth, home, secret, workspace/'.cursor', workspace/'.git'):
         assert f'Write({path})' in policy['deny']
         assert f'Write({path}/**)' in policy['deny']
     assert str(workspace/'.cursor') in sandbox['additionalReadonlyPaths']
+    assert str(workspace/'.git') in sandbox['additionalReadonlyPaths']
     assert str(config.root/'published') in sandbox['additionalReadPaths']
     assert sandbox['networkPolicy'] == {'default': 'deny', 'allow': [], 'deny': ['*']}
     hook = json.loads((workspace/'.cursor/hooks.json').read_text())['hooks']['subagentStart'][0]
@@ -283,6 +287,7 @@ def test_failed_boundary_stops_launch_before_frontend_or_model(deployed, monkeyp
         pytest.fail('A failed boundary must not start the frontend or model')
     monkeypatch.setattr(cursor.subprocess, 'run', sandbox_run)
     monkeypatch.setattr(cursor, 'bootstrap_metadata', lambda *args: None)
+    monkeypatch.setattr(cursor, 'approve_mcp', lambda *args: None)
     monkeypatch.setattr(cursor, 'start_frontend', unexpected_start)
     monkeypatch.setattr(cursor.agent_host, 'start', unexpected_start)
     with pytest.raises(RuntimeError, match='no model run was started'):
@@ -389,3 +394,36 @@ def test_actual_init_rejects_silent_model_downgrade(deployed, changed):
     else:
         cursor.capture_event(home, event, requested_model=cursor.MODEL)
     assert json.loads((home/'model-check.json').read_text())['passed'] is (changed is None)
+
+
+def test_deploy_anchors_project_inside_rax_workspace(deployed):
+    _, value, _, _ = deployed
+    workspace = value['workspace']
+    # check_output is stubbed by the fixture for Cursor's --version only.
+    result = subprocess.run(['git', '-C', str(workspace), 'rev-parse', '--show-toplevel'],
+                            capture_output=True, text=True, check=True)
+    assert Path(result.stdout.strip()) == workspace
+    assert (workspace/'.git/config').is_file()
+
+
+@pytest.mark.parametrize('returncode', [0, 1])
+def test_mcp_approval_is_local_and_limited_to_rax(deployed, monkeypatch, returncode):
+    config, value, auth, _ = deployed
+    calls = []
+    def approve(command, **kwargs):
+        calls.append(command)
+        assert command == [str(value['cursor']), 'mcp', 'enable', 'auto_research']
+        assert kwargs['cwd'] == value['workspace']
+        assert kwargs['env']['CURSOR_CONFIG_DIR'] == str(value[cursor.HOME_KEY])
+        assert kwargs['env']['XDG_CONFIG_HOME'] == str(auth.parent)
+        return subprocess.CompletedProcess(command, returncode, '', '')
+    monkeypatch.setattr(cursor.subprocess, 'run', approve)
+    if returncode:
+        with pytest.raises(RuntimeError, match='no model run was started'):
+            cursor.approve_mcp(config, value)
+    else:
+        cursor.approve_mcp(config, value)
+    assert len(calls) == 1
+    result = json.loads((value[cursor.HOME_KEY]/'mcp-check.json').read_text())
+    assert result['passed'] is (returncode == 0)
+    assert result['approved_servers'] == ([] if returncode else ['auto_research'])

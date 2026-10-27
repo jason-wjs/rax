@@ -40,6 +40,10 @@ def deploy(config, *, binary=None, model=None, key_file=None, auth_home=None, ba
         raise ValueError('Cursor uses its native account service, not a custom model endpoint')
     binary, auth = cursor_binary(binary), account_home(auth_home)
     prepared = prepare_workspace(config, HOME_NAME)
+    # Cursor discovers project MCP/policies from the nearest .git marker. Keep
+    # that root inside the workspace RAX just created, independent of ancestors.
+    subprocess.run(['git', 'init', '--quiet', str(prepared['workspace'])],
+                   check=True, capture_output=True, text=True, timeout=30)
     version = subprocess.check_output([str(binary), '--version'], text=True, timeout=30).strip()
     persist(config.root/LOGIN_FILE, {'agent_cli': 'cursor', 'provider': 'cursor-account',
         'model': model or MODEL, 'effort': config.agent_effort, 'binary': str(binary),
@@ -81,7 +85,7 @@ def write_home(config, deployed, socket=None):
         'allow': ['Shell(*)', f'Read({workspace}/**)', f'Write({workspace}/**)',
                   'Mcp(auto_research:*)', *(f'Read({path}/**)' for path in reads)],
         'deny': ['WebFetch(*)', *(rule for path in private for rule in (f'Read({path})', f'Read({path}/**)')),
-                 *(rule for path in (*private, str(workspace/'.cursor'))
+                 *(rule for path in (*private, str(workspace/'.cursor'), str(workspace/'.git'))
                    for rule in (f'Write({path})', f'Write({path}/**)'))]}
     settings_path = home/'cli-config.json'
     previous = json.loads(settings_path.read_text()) if settings_path.exists() else {}
@@ -98,7 +102,7 @@ def write_home(config, deployed, socket=None):
     cursor.mkdir(exist_ok=True)
     persist(cursor/'cli.json', {'permissions': permissions})
     persist(cursor/'sandbox.json', {'type': 'workspace_readwrite', 'readBoundary': 'workspace',
-        'additionalReadPaths': reads, 'additionalReadonlyPaths': [*reads, str(cursor)],
+        'additionalReadPaths': reads, 'additionalReadonlyPaths': [*reads, str(cursor), str(workspace/'.git')],
         'networkPolicy': {'default': 'deny', 'allow': [], 'deny': ['*']}})
     persist(cursor/'mcp.json', {'mcpServers': {'auto_research': {
         'command': str(agent_host.agent_python()), 'args': ['-I', str(agent_host.BRIDGE), str(socket)]}}})
@@ -113,7 +117,7 @@ def agent_command(config, deployed, *, prompt, interactive=False, json_output=Fa
         raise ValueError('Cursor currently uses the non-interactive CLI driver')
     value = json.loads(Path(deployed['login']).read_text())
     command = [str(deployed['cursor']), '--print', '--output-format', 'stream-json',
-        '--sandbox', 'enabled', '--approve-mcps', '--trust', '--workspace', str(deployed['workspace']),
+        '--sandbox', 'enabled', '--trust', '--workspace', str(deployed['workspace']),
         '--model', value['model']]
     if deployed.get('resume_session'):
         command += ['--resume', deployed['resume_session']]
@@ -279,6 +283,18 @@ def bootstrap_metadata(config, deployed, timeout=60):
         persist(home/'bootstrap-check.json', outcome)
 
 
+def approve_mcp(config, deployed):
+    """Approve only this workspace's RAX server through Cursor's local CLI."""
+    result = subprocess.run([str(deployed['cursor']), 'mcp', 'enable', 'auto_research'],
+        cwd=deployed['workspace'],
+        env=agent_environment(config, deployed, agent_host.socket_path(config.root)),
+        capture_output=True, text=True, timeout=20)
+    persist(Path(deployed[HOME_KEY])/'mcp-check.json', {'passed': result.returncode == 0,
+        'approved_servers': ['auto_research'] if result.returncode == 0 else []})
+    if result.returncode:
+        raise RuntimeError('Cursor could not approve the workspace RAX MCP; no model run was started')
+
+
 def launch(config, deployed, *, gemini_key_file=None, prompt, interactive=False, capture=False,
            agent_runs=None, **unused):
     if interactive or capture:
@@ -286,6 +302,7 @@ def launch(config, deployed, *, gemini_key_file=None, prompt, interactive=False,
     socket = agent_host.socket_path(config.root)
     write_home(config, deployed, socket)
     bootstrap_metadata(config, deployed)
+    approve_mcp(config, deployed)
     preflight(config, deployed)
     home = Path(deployed[HOME_KEY])
     requested_model = json.loads(Path(deployed['login']).read_text())['model']
