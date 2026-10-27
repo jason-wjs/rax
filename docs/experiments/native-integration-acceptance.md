@@ -18,6 +18,14 @@ and rehearsal episodes, three formal episodes, and the original simulator,
 observation, isolation and scoring settings. A disposable `--prepare-only` check
 must use a different session directory from the actual run.
 
+The launcher's host `PATH` must resolve a bubblewrap binary supporting `--size`,
+which the existing controller sandbox uses to bound its scratch filesystem.
+An older installed `bwrap` can launch the native agent but fail only when the
+first controller rehearsal starts. Use a verified project-local compatible binary;
+do not remove the sandbox option or change system security policy to get past it.
+Both normal code-formal startup and `--prepare-only` check this capability before
+deployment or model execution.
+
 Pass the companion prompt through the existing `--exec-prompt` option when
 launching the configured native harness. For example, after setting the model,
 endpoint and private key-file variables for Claude Code:

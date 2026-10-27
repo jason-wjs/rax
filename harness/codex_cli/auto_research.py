@@ -23,6 +23,7 @@ from harness.codex_cli.configuration import subagent_settings, write_config
 from services.controller.config import Configuration
 from services.controller.demonstrations import provision_demonstration, task_demonstration_context
 from services.controller.gemini import load_key
+from services.controller.sandbox import BundleSandbox
 from services.controller.storage import persist
 from services.benchmarks import for_config
 
@@ -770,6 +771,8 @@ def main():
         persist(record, lifecycle)
         deployed = None
         try:
+            if not config.agent_formal:
+                BundleSandbox(config.formal).preflight()
             if config.agent_cli == 'claude':
                 from harness.claude_cli import auto_research as claude
             elif config.agent_cli not in ('codex', 'claude'):

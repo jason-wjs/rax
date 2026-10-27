@@ -1,7 +1,11 @@
 """Cursor adapter contracts. No account calls or inference; native CLI smoke is separate."""
 from dataclasses import replace
+from contextlib import redirect_stdout
+import io
 import json
+import os
 import shlex
+import socket
 from pathlib import Path
 import subprocess
 import sys
@@ -278,6 +282,7 @@ def test_failed_boundary_stops_launch_before_frontend_or_model(deployed, monkeyp
     def unexpected_start(*args, **kwargs):
         pytest.fail('A failed boundary must not start the frontend or model')
     monkeypatch.setattr(cursor.subprocess, 'run', sandbox_run)
+    monkeypatch.setattr(cursor, 'bootstrap_metadata', lambda *args: None)
     monkeypatch.setattr(cursor, 'start_frontend', unexpected_start)
     monkeypatch.setattr(cursor.agent_host, 'start', unexpected_start)
     with pytest.raises(RuntimeError, match='no model run was started'):
@@ -286,3 +291,101 @@ def test_failed_boundary_stops_launch_before_frontend_or_model(deployed, monkeyp
     assert calls[0][1:3] == ['sandbox', 'run']
     assert not json.loads((value[cursor.HOME_KEY]/'boundary-check.json').read_text())['passed']
     assert not (value[cursor.HOME_KEY]/'boundary-canary.txt').exists()
+
+
+@pytest.mark.parametrize('mode,expected', [('success', None), ('reject', 'authentication failed'),
+                                         ('exit', 'exited before'), ('stall', 'timed out')])
+def test_official_bootstrap_protocol_has_no_session_or_generation(deployed, mode, expected):
+    config, value, _, _ = deployed
+    calls = value['workspace']/'metadata-methods.jsonl'
+    binary = value['cursor']
+    binary.write_text(f'''#!{sys.executable}
+import json,sys,time
+from pathlib import Path
+for line in sys.stdin:
+    request=json.loads(line)
+    with Path({str(calls)!r}).open('a') as out:
+        out.write(json.dumps(request['method'])+'\\n')
+    if request['method']=='authenticate':
+        if {mode!r}=='exit': sys.exit(2)
+        if {mode!r}=='stall': time.sleep(10)
+    response={{'jsonrpc':'2.0','id':request['id'],'result':{{}}}}
+    if request['method']=='authenticate' and {mode!r}=='reject':
+        response={{'jsonrpc':'2.0','id':request['id'],'error':{{'code':-32000}}}}
+    print(json.dumps(response),flush=True)
+''')
+    binary.chmod(0o700)
+    if expected:
+        with pytest.raises(RuntimeError, match=expected):
+            cursor.bootstrap_metadata(config, value, timeout=1)
+    else:
+        cursor.bootstrap_metadata(config, value, timeout=5)
+    assert [json.loads(line) for line in calls.read_text().splitlines()] == ['initialize', 'authenticate']
+    outcome = json.loads((value[cursor.HOME_KEY]/'bootstrap-check.json').read_text())
+    assert outcome['passed'] is (mode == 'success')
+    assert outcome['generation_requests'] == 0
+    assert not cursor.latest_session(value[cursor.HOME_KEY])
+
+
+def test_failed_bootstrap_stops_before_boundary_frontend_or_model(deployed, monkeypatch):
+    config, value, _, _ = deployed
+    def fail(*args):
+        raise RuntimeError('metadata unavailable')
+    def unexpected(*args, **kwargs):
+        pytest.fail('Bootstrap failure must stop launch')
+    monkeypatch.setattr(cursor, 'bootstrap_metadata', fail)
+    monkeypatch.setattr(cursor, 'preflight', unexpected)
+    monkeypatch.setattr(cursor, 'start_frontend', unexpected)
+    monkeypatch.setattr(cursor.agent_host, 'start', unexpected)
+    with pytest.raises(RuntimeError, match='metadata unavailable'):
+        cursor.launch(config, value, prompt='Must not generate')
+
+
+def test_boundary_accepts_visible_metadata_only_when_contents_are_denied(deployed, monkeypatch):
+    config, value, _, _ = deployed
+    (value['workspace']/'output').mkdir()
+    protected = {value[cursor.HOME_KEY]/'boundary-canary.txt', Path(f'/proc/{os.getpid()}/cmdline')}
+    read_bytes, glob = Path.read_bytes, Path.glob
+    def denied(path):
+        if path in protected:
+            assert path.exists()  # Real Linux metadata remains visible under the vendor sandbox.
+            raise PermissionError('fixture kernel read denial')
+        return read_bytes(path)
+    def no_network(*args, **kwargs):
+        raise OSError('fixture network namespace')
+    def sandbox_run(command, **kwargs):
+        script = shlex.split(' '.join(command[4:]))[3]
+        output = io.StringIO()
+        with redirect_stdout(output):
+            exec(compile(script, '<native-boundary-fixture>', 'exec'), {})
+        return subprocess.CompletedProcess(command, 0, output.getvalue(), '')
+    monkeypatch.setattr(Path, 'read_bytes', denied)
+    monkeypatch.setattr(Path, 'glob', lambda path, pattern: [] if path == Path('/dev') else glob(path, pattern))
+    monkeypatch.setattr(socket, 'create_connection', no_network)
+    monkeypatch.setattr(cursor.subprocess, 'run', sandbox_run)
+    cursor.preflight(config, value)
+    assert json.loads((value[cursor.HOME_KEY]/'boundary-check.json').read_text())['passed']
+
+
+@pytest.mark.parametrize('changed', [None, 'label', 'context', 'effort', 'fast', 'max_mode'])
+def test_actual_init_rejects_silent_model_downgrade(deployed, changed):
+    _, value, _, _ = deployed
+    home = value[cursor.HOME_KEY]
+    params = {'context': '500k', 'reasoning_effort': 'xhigh', 'fast': 'true'}
+    label = 'Grok 4.7 500K Extra High Fast'
+    if changed == 'label': label = 'Grok 4.7 High Fast'
+    if changed == 'context': params['context'] = '256k'
+    if changed == 'effort': params['reasoning_effort'] = 'high'
+    if changed == 'fast': params['fast'] = 'false'
+    settings = json.loads((home/'cli-config.json').read_text())
+    settings.update(model={'maxMode': True}, maxMode=changed != 'max_mode',
+        selectedModel={'modelId': 'grok-4.7', 'parameters': [{'id': k, 'value': v} for k, v in params.items()]})
+    (home/'cli-config.json').write_text(json.dumps(settings))
+    event = json.dumps({'type': 'system', 'subtype': 'init', 'session_id': SESSION, 'model': label})
+    if changed:
+        with pytest.raises(RuntimeError, match='did not initialize'):
+            cursor.capture_event(home, event, requested_model=cursor.MODEL)
+        assert cursor.last_error(home)
+    else:
+        cursor.capture_event(home, event, requested_model=cursor.MODEL)
+    assert json.loads((home/'model-check.json').read_text())['passed'] is (changed is None)

@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import selectors
 import shutil
 import shlex
 import stat
@@ -148,7 +149,7 @@ def last_error(home):
     return json.loads(path.read_text())['error'] if path.exists() else None
 
 
-def capture_event(home, line):
+def capture_event(home, line, *, requested_model=None):
     try:
         event = json.loads(line)
     except ValueError:
@@ -158,6 +159,23 @@ def capture_event(home, line):
     home = Path(home)
     if event.get('type') == 'system' and event.get('subtype') == 'init':
         persist(home/'rax-session.json', {'session_id': event['session_id'], 'model': event.get('model')})
+        if requested_model == MODEL:
+            settings = json.loads((home/'cli-config.json').read_text())
+            selected = settings.get('selectedModel') or {}
+            parameters = {item['id']: item['value'] for item in selected.get('parameters', [])}
+            actual = ' '.join(str(event.get('model', '')).replace('\u200b', '').split())
+            passed = (actual == 'Grok 4.7 500K Extra High Fast'
+                and selected.get('modelId') == 'grok-4.7'
+                and parameters == {'context': '500k', 'reasoning_effort': 'xhigh', 'fast': 'true'}
+                and settings.get('maxMode') is True
+                and (settings.get('model') or {}).get('maxMode') is True)
+            persist(home/'model-check.json', {'passed': passed, 'requested': requested_model,
+                'actual_init_model': actual, 'parameters': parameters,
+                'max_mode': settings.get('maxMode')})
+            if not passed:
+                message = 'Cursor did not initialize the requested Grok 4.7 500k/xhigh/Fast mode'
+                persist(home/'rax-error.json', {'error': message})
+                raise RuntimeError(message)
     if event.get('type') == 'error' or event.get('type') == 'result' and event.get('is_error'):
         persist(home/'rax-error.json', {'error': event.get('message') or event.get('result') or event.get('subtype')})
     if event.get('type') == 'result':
@@ -184,7 +202,9 @@ try: data=Path({str(canary)!r}).read_bytes()
 except OSError: pass
 else: assert not data, "Private launcher file is readable"
 assert not list(Path('/dev').glob('nvidia*')), "GPU exposed"
-assert not Path('/proc/{os.getpid()}/cmdline').exists(), "Host process visible"
+try: data=Path('/proc/{os.getpid()}/cmdline').read_bytes()
+except OSError: pass
+else: assert not data, "Host process command line is readable"
 try: socket.create_connection(('1.1.1.1',443),timeout=1).close()
 except OSError: pass
 else: raise AssertionError("Internet is reachable")
@@ -206,14 +226,69 @@ print('RAX_CURSOR_BOUNDARY_OK')
         canary.unlink(missing_ok=True)
 
 
+def bootstrap_metadata(config, deployed, timeout=60):
+    """Initialize official account/feature metadata without creating a model turn.
+
+    The native sandbox command otherwise sees an uninitialized read-control gate
+    and silently selects its system boundary, even when workspace was requested.
+    ACP authentication runs the vendor's normal startup migrations. No session or
+    prompt is sent, and the subsequent independent boundary check must still pass.
+    """
+    home = Path(deployed[HOME_KEY])
+    started = time.monotonic()
+    outcome = {'passed': False, 'method': 'acp-authenticate', 'generation_requests': 0}
+    process = agent_host.start([str(deployed['cursor']), '--workspace',
+        str(deployed['workspace']), '--trust', 'acp'], cwd=deployed['workspace'],
+        env=agent_environment(config, deployed, agent_host.socket_path(config.root)),
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    def send(request_id, method, params):
+        process.stdin.write((json.dumps({'jsonrpc': '2.0', 'id': request_id,
+            'method': method, 'params': params})+'\n').encode())
+        process.stdin.flush()
+    try:
+        send(1, 'initialize', {'protocolVersion': 1, 'clientCapabilities': {},
+            'clientInfo': {'name': 'rax-metadata-bootstrap', 'version': '1'}})
+        pending, buffer = 1, b''
+        with selectors.DefaultSelector() as events:
+            events.register(process.stdout, selectors.EVENT_READ)
+            while time.monotonic()-started < timeout:
+                if not events.select(min(1, max(0, timeout-(time.monotonic()-started)))):
+                    continue
+                chunk = os.read(process.stdout.fileno(), 65536)
+                if not chunk:
+                    raise RuntimeError('Cursor metadata bootstrap exited before authentication')
+                buffer += chunk
+                while b'\n' in buffer:
+                    line, buffer = buffer.split(b'\n', 1)
+                    response = json.loads(line)
+                    if response.get('id') != pending or 'method' in response:
+                        continue
+                    if 'error' in response or 'result' not in response:
+                        raise RuntimeError('Cursor official metadata authentication failed')
+                    if pending == 2:
+                        outcome['passed'] = True
+                        return
+                    send(2, 'authenticate', {'methodId': 'cursor_login'})
+                    pending = 2
+                if len(buffer) > 1024*1024:
+                    raise RuntimeError('Cursor metadata bootstrap returned an invalid response')
+        raise RuntimeError('Cursor metadata bootstrap timed out; no model run was started')
+    finally:
+        agent_host.stop(process, grace=3)
+        outcome['duration_seconds'] = round(time.monotonic()-started, 3)
+        persist(home/'bootstrap-check.json', outcome)
+
+
 def launch(config, deployed, *, gemini_key_file=None, prompt, interactive=False, capture=False,
            agent_runs=None, **unused):
     if interactive or capture:
         raise ValueError('Cursor launch requires non-interactive streaming mode')
     socket = agent_host.socket_path(config.root)
     write_home(config, deployed, socket)
+    bootstrap_metadata(config, deployed)
     preflight(config, deployed)
     home = Path(deployed[HOME_KEY])
+    requested_model = json.loads(Path(deployed['login']).read_text())['model']
     server = agent = None
     with (config.root/'frontend.log').open('ab') as log:
         try:
@@ -227,7 +302,7 @@ def launch(config, deployed, *, gemini_key_file=None, prompt, interactive=False,
                 agent_host.record(agent, config.root/PID_FILE)
                 try:
                     for line in agent.stdout:
-                        capture_event(home, line)
+                        capture_event(home, line, requested_model=requested_model)
                         print(line, end='', flush=True)
                     return agent.wait()
                 finally:

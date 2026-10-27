@@ -144,8 +144,14 @@ class BundleSandbox:
         resource.setrlimit(resource.RLIMIT_NOFILE, (OPEN_FILES, OPEN_FILES))
 
     def preflight(self):
-        if not shutil.which('bwrap'):
+        binary = shutil.which('bwrap')
+        if not binary:
             raise RuntimeError('bubblewrap (bwrap) is required to run bundles')
+        help_text = subprocess.run([binary, '--help'], capture_output=True, text=True,
+                                   check=True, timeout=10).stdout
+        if '--size' not in help_text.split():
+            raise RuntimeError(f'bubblewrap at {binary} does not support --size, required to limit '
+                               'bundle scratch space; put a compatible bwrap on PATH')
         if not (python_environment()/'bin/python').is_file():
             raise RuntimeError(f'No Python in {python_environment()}')
 

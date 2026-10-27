@@ -60,6 +60,8 @@ def test_generic_claude_launch_options_reach_existing_adapter(tmp_path, monkeypa
         prefix+'model', 'deepseek-v4.1-flash', prefix+'key-file', '/fixture/private.key',
         prefix+'base-url', 'https://relay.invalid')
     config.agent_cli, config.agent_provider = 'claude', 'custom'
+    config.formal = configuration(tmp_path).formal
+    monkeypatch.setattr(launcher.BundleSandbox, 'preflight', lambda self: None)
     seen = {}
     def deploy(config, **kwargs):
         seen.update(kwargs)
@@ -82,6 +84,8 @@ def test_conflicting_generic_and_legacy_claude_options_fail_before_deploy(tmp_pa
 def test_resume_passes_the_selected_claude_binary(tmp_path, monkeypatch):
     config = launcher_main(tmp_path, monkeypatch, '--resume', '--agent-binary', '/fixture/claude')
     config.agent_cli, config.agent_provider = 'claude', 'custom'
+    config.formal = configuration(tmp_path).formal
+    monkeypatch.setattr(launcher.BundleSandbox, 'preflight', lambda self: None)
     stopped_session(config.root)
     (config.root/'configuration.json').write_text('{}')
     seen = {}
