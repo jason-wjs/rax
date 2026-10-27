@@ -117,10 +117,10 @@ def write_home(config, deployed, socket=None):
 def agent_command(config, deployed, *, prompt, interactive=False, json_output=False):
     if interactive:
         raise ValueError('Cursor currently uses the non-interactive CLI driver')
-    value = json.loads(Path(deployed['login']).read_text())
+    # bootstrap_metadata has selected and verified the model through official ACP.
+    # Repeating --model would re-enter the vendor's two-second catalog race.
     command = [str(deployed['cursor']), '--print', '--output-format', 'stream-json',
-        '--sandbox', 'enabled', '--trust', '--workspace', str(deployed['workspace']),
-        '--model', value['model']]
+        '--sandbox', 'enabled', '--trust', '--workspace', str(deployed['workspace'])]
     if deployed.get('resume_session'):
         command += ['--resume', deployed['resume_session']]
     return [*command, '--', prompt]
@@ -232,53 +232,80 @@ print('RAX_CURSOR_BOUNDARY_OK')
         canary.unlink(missing_ok=True)
 
 
-def bootstrap_metadata(config, deployed, timeout=60):
-    """Initialize official account/feature metadata without creating a model turn.
+def bootstrap_metadata(config, deployed, timeout=90):
+    """Use official ACP settings to select the exact model without a model turn.
 
-    The native sandbox command otherwise sees an uninitialized read-control gate
-    and silently selects its system boundary, even when workspace was requested.
-    ACP authentication runs the vendor's normal startup migrations. No session or
-    prompt is sent, and the subsequent independent boundary check must still pass.
+    CLI --model resolves variants through a catalog with a two-second timeout.
+    ACP's parameter picker waits for the complete catalog and saves the selection.
+    A metadata-only session is created; no prompt is sent or RAX resume ID written.
     """
     home = Path(deployed[HOME_KEY])
+    requested = json.loads(Path(deployed['login']).read_text())['model']
+    if requested != MODEL:
+        raise ValueError('Cursor currently requires the verified Grok 4.7 500k/xhigh/Fast model')
     started = time.monotonic()
-    outcome = {'passed': False, 'method': 'acp-authenticate', 'generation_requests': 0}
+    outcome = {'passed': False, 'method': 'acp-model-parameters', 'generation_requests': 0}
     process = agent_host.start([str(deployed['cursor']), '--workspace',
         str(deployed['workspace']), '--trust', 'acp'], cwd=deployed['workspace'],
         env=agent_environment(config, deployed, agent_host.socket_path(config.root)),
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    def send(request_id, method, params):
-        process.stdin.write((json.dumps({'jsonrpc': '2.0', 'id': request_id,
-            'method': method, 'params': params})+'\n').encode())
-        process.stdin.flush()
+    request_id, buffer = 0, b''
     try:
-        send(1, 'initialize', {'protocolVersion': 1, 'clientCapabilities': {},
-            'clientInfo': {'name': 'rax-metadata-bootstrap', 'version': '1'}})
-        pending, buffer = 1, b''
         with selectors.DefaultSelector() as events:
             events.register(process.stdout, selectors.EVENT_READ)
-            while time.monotonic()-started < timeout:
-                if not events.select(min(1, max(0, timeout-(time.monotonic()-started)))):
-                    continue
-                chunk = os.read(process.stdout.fileno(), 65536)
-                if not chunk:
-                    raise RuntimeError('Cursor metadata bootstrap exited before authentication')
-                buffer += chunk
-                while b'\n' in buffer:
-                    line, buffer = buffer.split(b'\n', 1)
-                    response = json.loads(line)
-                    if response.get('id') != pending or 'method' in response:
+            def request(method, params):
+                nonlocal request_id, buffer
+                request_id += 1
+                process.stdin.write((json.dumps({'jsonrpc': '2.0', 'id': request_id,
+                    'method': method, 'params': params})+'\n').encode())
+                process.stdin.flush()
+                while time.monotonic()-started < timeout:
+                    if not events.select(min(1, max(0, timeout-(time.monotonic()-started)))):
                         continue
-                    if 'error' in response or 'result' not in response:
-                        raise RuntimeError('Cursor official metadata authentication failed')
-                    if pending == 2:
-                        outcome['passed'] = True
-                        return
-                    send(2, 'authenticate', {'methodId': 'cursor_login'})
-                    pending = 2
-                if len(buffer) > 1024*1024:
-                    raise RuntimeError('Cursor metadata bootstrap returned an invalid response')
-        raise RuntimeError('Cursor metadata bootstrap timed out; no model run was started')
+                    chunk = os.read(process.stdout.fileno(), 65536)
+                    if not chunk:
+                        raise RuntimeError('Cursor metadata bootstrap exited before model selection')
+                    buffer += chunk
+                    while b'\n' in buffer:
+                        line, buffer = buffer.split(b'\n', 1)
+                        response = json.loads(line)
+                        if response.get('id') != request_id or 'method' in response:
+                            continue
+                        if 'error' in response or 'result' not in response:
+                            raise RuntimeError(f'Cursor official metadata request failed: {method}')
+                        return response['result']
+                    if len(buffer) > 1024*1024:
+                        raise RuntimeError('Cursor metadata bootstrap returned an invalid response')
+                raise RuntimeError('Cursor metadata bootstrap timed out; no model run was started')
+            # This declares our implemented ACP config-option capability; it does
+            # not modify the vendor's feature gates or account entitlements.
+            request('initialize', {'protocolVersion': 1,
+                'clientCapabilities': {'_meta': {'parameterizedModelPicker': True}},
+                'clientInfo': {'name': 'rax-metadata-bootstrap', 'version': '1'}})
+            request('authenticate', {'methodId': 'cursor_login'})
+            response = request('session/new', {'cwd': str(deployed['workspace']), 'mcpServers': []})
+            session_id = response['sessionId']
+            expected = {'model': 'grok-4.7', 'context': '500k',
+                        'reasoning_effort': 'xhigh', 'fast': 'true'}
+            for key, value in expected.items():
+                option = next((o for o in response.get('configOptions', []) if o['id'] == key), {})
+                if not any(o['value'] == value for o in option.get('options', [])):
+                    raise RuntimeError(f'Cursor does not advertise the requested {key} option')
+                response = request('session/set_config_option', {
+                    'sessionId': session_id, 'configId': key, 'value': value})
+            actual = {o['id']: o.get('currentValue') for o in response.get('configOptions', [])
+                      if o['id'] in expected}
+            settings = json.loads((home/'cli-config.json').read_text())
+            selected = settings.get('selectedModel') or {}
+            parameters = {p['id']: p['value'] for p in selected.get('parameters', [])}
+            outcome.update(config_options=actual, parameters=parameters,
+                           max_mode=settings.get('maxMode'))
+            if (actual != expected or selected.get('modelId') != expected['model']
+                    or parameters != {k: v for k, v in expected.items() if k != 'model'}
+                    or settings.get('maxMode') is not True
+                    or (settings.get('model') or {}).get('maxMode') is not True):
+                raise RuntimeError('Cursor official model selection did not preserve 500k/xhigh/Fast')
+            outcome['passed'] = True
     finally:
         agent_host.stop(process, grace=3)
         outcome['duration_seconds'] = round(time.monotonic()-started, 3)

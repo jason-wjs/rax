@@ -62,10 +62,11 @@ def deployed(tmp_path, monkeypatch):
     return config, value, auth, secret
 
 
-def test_command_keeps_requested_model_and_resumes_recorded_session(deployed):
+def test_command_uses_official_saved_model_and_resumes_recorded_session(deployed):
     config, value, _, _ = deployed
     command = cursor.agent_command(config, value, prompt='Start robot work')
-    assert command[command.index('--model')+1] == cursor.MODEL
+    assert '--model' not in command
+    assert json.loads(value['login'].read_text())['model'] == cursor.MODEL
     assert command[command.index('--sandbox')+1] == 'enabled'
     assert command[command.index('--output-format')+1] == 'stream-json'
     assert command[-2:] == ['--', 'Start robot work']
@@ -76,7 +77,7 @@ def test_command_keeps_requested_model_and_resumes_recorded_session(deployed):
     assert command[command.index('--resume')+1] == SESSION
     with pytest.raises(ValueError, match='non-interactive'):
         cursor.agent_command(config, value, prompt='', interactive=True)
-    # This proves argument preservation, not vendor acceptance of the 500k selection.
+    # Actual system/init remains responsible for rejecting a downgraded selection.
 
 
 def test_workspace_policy_protects_account_and_controls(deployed):
@@ -312,24 +313,53 @@ def test_failed_boundary_stops_launch_before_frontend_or_model(deployed, monkeyp
     assert not (value[cursor.HOME_KEY]/'boundary-canary.txt').exists()
 
 
-@pytest.mark.parametrize('mode,expected', [('success', None), ('reject', 'authentication failed'),
-                                         ('exit', 'exited before'), ('stall', 'timed out')])
-def test_official_bootstrap_protocol_has_no_session_or_generation(deployed, mode, expected):
+@pytest.mark.parametrize('mode,expected', [
+    ('success', None), ('reject', 'metadata request failed'),
+    ('exit', 'exited before'), ('stall', 'timed out'),
+    ('missing_option', 'does not advertise'), ('downgrade', 'did not preserve'),
+    ('persisted_downgrade', 'did not preserve'), ('max_disabled', 'did not preserve')])
+def test_official_bootstrap_selects_all_parameters_without_generation(deployed, mode, expected):
     config, value, _, _ = deployed
     calls = value['workspace']/'metadata-methods.jsonl'
     binary = value['cursor']
     binary.write_text(f'''#!{sys.executable}
-import json,sys,time
+import json,os,sys,time
 from pathlib import Path
+selected={{'model':'auto','context':'256k','reasoning_effort':'high','fast':'false'}}
+values={{'model':['auto','grok-4.7'],'context':['256k','500k'],
+        'reasoning_effort':['high','xhigh'],'fast':['false','true']}}
+def options():
+    result=[{{'id':key,'currentValue':current,'options':[{{'value':v}} for v in values[key]]}}
+            for key,current in selected.items() if key=='model' or selected['model']=='grok-4.7']
+    if {mode!r}=='missing_option':
+        for o in result:
+            if o['id']=='context': o['options']=[{{'value':'256k'}}]
+    return result
+assert '--model' not in sys.argv
 for line in sys.stdin:
     request=json.loads(line)
     with Path({str(calls)!r}).open('a') as out:
-        out.write(json.dumps(request['method'])+'\\n')
-    if request['method']=='authenticate':
+        out.write(json.dumps(request)+'\\n')
+    method=request['method']
+    assert method in ['initialize','authenticate','session/new','session/set_config_option']
+    if method=='authenticate':
         if {mode!r}=='exit': sys.exit(2)
         if {mode!r}=='stall': time.sleep(10)
-    response={{'jsonrpc':'2.0','id':request['id'],'result':{{}}}}
-    if request['method']=='authenticate' and {mode!r}=='reject':
+    result={{}}
+    if method=='session/new': result={{'sessionId':'metadata-only-session','configOptions':options()}}
+    if method=='session/set_config_option':
+        selected[request['params']['configId']]=request['params']['value']
+        if {mode!r}=='downgrade' and request['params']['configId']=='fast': selected['context']='256k'
+        path=Path(os.environ['CURSOR_CONFIG_DIR'])/'cli-config.json'
+        settings=json.loads(path.read_text())
+        params={{k:v for k,v in selected.items() if k!='model'}}
+        if {mode!r}=='persisted_downgrade': params['context']='256k'
+        settings.update(selectedModel={{'modelId':selected['model'],'parameters':[{{'id':k,'value':v}} for k,v in params.items()]}},
+                        model={{'modelId':selected['model'],'maxMode':True}},maxMode={mode!r}!='max_disabled',hasChangedDefaultModel=True)
+        path.write_text(json.dumps(settings))
+        result={{'configOptions':options()}}
+    response={{'jsonrpc':'2.0','id':request['id'],'result':result}}
+    if method=='authenticate' and {mode!r}=='reject':
         response={{'jsonrpc':'2.0','id':request['id'],'error':{{'code':-32000}}}}
     print(json.dumps(response),flush=True)
 ''')
@@ -339,7 +369,22 @@ for line in sys.stdin:
             cursor.bootstrap_metadata(config, value, timeout=1)
     else:
         cursor.bootstrap_metadata(config, value, timeout=5)
-    assert [json.loads(line) for line in calls.read_text().splitlines()] == ['initialize', 'authenticate']
+    requests = [json.loads(line) for line in calls.read_text().splitlines()]
+    methods = [r['method'] for r in requests]
+    assert methods[:2] == ['initialize', 'authenticate']
+    assert not any('prompt' in method for method in methods)
+    assert requests[0]['params']['clientCapabilities'] == {'_meta': {'parameterizedModelPicker': True}}
+    if mode in ('reject', 'exit', 'stall'):
+        assert methods == ['initialize', 'authenticate']
+    else:
+        assert methods[:3] == ['initialize', 'authenticate', 'session/new']
+        assert requests[2]['params']['mcpServers'] == []
+    if mode == 'success':
+        assert [(r['params']['configId'], r['params']['value']) for r in requests[3:]] == [
+            ('model', 'grok-4.7'), ('context', '500k'), ('reasoning_effort', 'xhigh'), ('fast', 'true')]
+        # Native print will use the official selection, avoiding the short catalog
+        # timeout in initial --model resolution. It still checks the real init.
+        assert '--model' not in cursor.agent_command(config, value, prompt='Start')
     outcome = json.loads((value[cursor.HOME_KEY]/'bootstrap-check.json').read_text())
     assert outcome['passed'] is (mode == 'success')
     assert outcome['generation_requests'] == 0
